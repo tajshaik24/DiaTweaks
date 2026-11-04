@@ -4,6 +4,8 @@ Small tweaks for [Dia](https://www.diabrowser.com) that stay in place when Dia u
 
 Unofficial and not affiliated with The Browser Company. Apple Silicon, macOS 14 or later.
 
+This is a fork of [JaceThings/DiaTweaks](https://github.com/JaceThings/DiaTweaks). It updates itself from this fork's releases, and pulls in the original's changes from time to time. The wiki pages and Settings previews still come from the original.
+
 ## Tweaks
 
 Each tweak changes one thing about Dia: it hides something you don't use, changes how something looks, or adds something Dia doesn't do. They're grouped as they are in Settings:
@@ -32,7 +34,7 @@ Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks
 3. Paste this into Terminal:
 
    ```sh
-   git clone https://github.com/JaceThings/DiaTweaks.git ~/DiaTweaks && ~/DiaTweaks/install.sh
+   git clone https://github.com/tajshaik24/DiaTweaks.git ~/DiaTweaks && ~/DiaTweaks/install.sh
    ```
 
 Dia quits and reopens. If macOS asks about "Dia Safe Storage", enter your password and click **Always Allow**.
@@ -66,7 +68,7 @@ Dia's own updater is switched off. **Settings → Patches → Software Update** 
 Update once by hand, then use `diatweaks update` from then on:
 
 ```sh
-rm -rf /tmp/DiaTweaks && git clone --depth 1 https://github.com/JaceThings/DiaTweaks.git /tmp/DiaTweaks && /tmp/DiaTweaks/install.sh
+rm -rf /tmp/DiaTweaks && git clone --depth 1 https://github.com/tajshaik24/DiaTweaks.git /tmp/DiaTweaks && /tmp/DiaTweaks/install.sh
 ```
 
 </details>
