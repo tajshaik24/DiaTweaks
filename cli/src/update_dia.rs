@@ -23,37 +23,47 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
 
     let spinner = ui.spinner("Checking for a newer Dia");
     let status = spinner.check(diapatch.status(&spinner))?;
-    let ready = match status.staged {
-        Some(staged) => {
+    // A waiting rebuild of the current Dia mustn't hide a newer Dia: downloading one replaces it.
+    let newer = match (&status.official, &status.feed) {
+        (Some(official), Some(latest)) if dia::is_newer(latest, official) => {
+            Some((official.clone(), latest.clone()))
+        }
+        _ => None,
+    };
+    let ready = match (newer, status.staged) {
+        (Some((official, latest)), staged) => {
+            spinner.stop(format_args!("Dia {latest} is out (you have {official})"));
+            if let Some(staged) = staged {
+                ui.info(format_args!(
+                    "Dia {latest} replaces the Dia {staged} that's waiting to install."
+                ));
+            }
+            if !ui.proceed(format_args!("Download Dia {latest} and patch it?"))? {
+                return Err(Cancelled::nothing_changed().into());
+            }
+            download(env, ui, &diapatch, &latest)?
+        }
+        (None, Some(staged)) => {
             spinner.stop(format_args!("Dia {staged} is downloaded and ready"));
             staged
         }
-        None => {
+        (None, None) => {
             let Some(official) = status.official else {
                 return Err(spinner.fail(anyhow::anyhow!(
                     "DiaTweaks has no copy of the official Dia. Run install.sh to set it up again."
                 )));
             };
-            let Some(latest) = status.feed else {
+            if status.feed.is_none() {
                 return Err(spinner.fail(anyhow::anyhow!(
                     "Couldn't reach Dia's update feed. Check your internet connection, then try again."
                 )));
-            };
-            if !dia::is_newer(&latest, &official) {
-                spinner.stop(format_args!("Dia {official} is up to date"));
-                if !status.patched {
-                    ui.warn(
-                        "Dia isn't patched right now. Run `diatweaks update` to patch it again.",
-                    );
-                }
-                ui.done("Nothing to update.");
-                return Ok(());
             }
-            spinner.stop(format_args!("Dia {latest} is out (you have {official})"));
-            if !ui.proceed(format_args!("Download Dia {latest} and patch it?"))? {
-                return Err(Cancelled::nothing_changed().into());
+            spinner.stop(format_args!("Dia {official} is up to date"));
+            if !status.patched {
+                ui.warn("Dia isn't patched right now. Run `diatweaks update` to patch it again.");
             }
-            download(env, ui, &diapatch, &latest)?
+            ui.done("Nothing to update.");
+            return Ok(());
         }
     };
     install(env, ui, &diapatch, &ready)
