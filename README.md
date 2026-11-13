@@ -57,7 +57,7 @@ Tweak names work as keys or titles, like `hideToolbar` or `"Hide Toolbar"`, and 
 
 ## Updating
 
-Dia's own updater is switched off. **Settings → Patches → Software Update** checks for a new Dia and a new DiaTweaks release, downloads either one, and relaunches Dia to install it, like macOS's Software Update. Under **Automatic Updates**, pick for each of Dia and DiaTweaks: off, just show updates, download them, or download and install them when you quit (the default).
+Dia's own updater is switched off. **Settings → Home → Software Update** checks for a new Dia and a new DiaTweaks release, downloads either one, and relaunches Dia to install it, like macOS's Software Update. Under **Automatic Updates**, pick for each of Dia and DiaTweaks: off, just show updates, download them, or download and install them when you quit (the default). A DiaTweaks you built from source with `install.sh` is never downloaded or replaced automatically: **Update Now** or `diatweaks update` installs the latest release, and automatic updates apply from then on.
 
 - **Dia now:** `diatweaks update-dia`
 - **DiaTweaks now:** `diatweaks update`
@@ -97,6 +97,13 @@ The tweaked Dia is signed by you instead of The Browser Company, so macOS checks
 </details>
 
 <details>
+<summary><strong>Why does screen sharing ask for permission again?</strong></summary>
+
+macOS ties Screen Recording to the app's signature, and the tweaked Dia is signed differently from the original. The first time DiaTweaks patches Dia (and when it goes back to the original), it clears the old permission so macOS asks once for the new one. Switch on **Dia** under **System Settings → Privacy & Security → Screen & System Audio Recording**, then quit and reopen Dia. Dia and DiaTweaks updates keep your permission. If sharing still loops, run `tccutil reset ScreenCapture company.thebrowser.dia` and try again.
+
+</details>
+
+<details>
 <summary><strong>Does it run in the background?</strong></summary>
 
 No. It only does anything while Dia is open.
@@ -119,7 +126,7 @@ If Dia crashes twice in a row right after opening, it opens next time with the t
 
 ## Uninstall
 
-In Dia, open **Settings → Patches** and click **Restore…**. Dia reopens as the original app with its own updates.
+In Dia, open **Settings → Home** and click **Restore…**. Dia reopens as the original app with its own updates.
 
 To also delete DiaTweaks' files and the `diatweaks` command, run `diatweaks restore --purge` instead.
 

@@ -2,8 +2,9 @@
 
 extern DPPatch DPTurnOffAI;
 
-// Settings rows and shortcuts named after one of Dia's AI features.
 BOOL DPIsAITitle(NSString *title);
+
+CGFloat DPHiddenSuggestionsHeight(NSView *suggestions);
 
 void DPInstallAIRows(void);
 void DPApplyAIRows(void);

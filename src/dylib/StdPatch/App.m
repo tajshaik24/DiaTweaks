@@ -5,25 +5,27 @@ void DPOnLaunch(void (^block)(void)) {
                                                 usingBlock:^(NSNotification *_) { block(); }];
 }
 
+// Dia posts no WillTerminate on a normal quit, only atexit runs; each block runs once, on whichever comes first.
 static NSMutableArray<void (^)(void)> *DPQuitBlocks;
 
 static void DPRunQuitBlocks(void) {
-    static BOOL ran;
-    if (ran) return;
-    ran = YES;
-    for (void (^block)(void) in DPQuitBlocks) block();
+    NSArray<void (^)(void)> *blocks;
+    @synchronized(DPQuitBlocks) {
+        blocks = [DPQuitBlocks copy];
+        [DPQuitBlocks removeAllObjects];
+    }
+    for (void (^block)(void) in blocks) block();
 }
 
-// Dia quits through its own shutdown, which never posts NSApplicationWillTerminateNotification, so a quit is caught as
-// the process exits. A crash or SIGTERM doesn't get there.
 void DPOnQuit(void (^block)(void)) {
-    if (!DPQuitBlocks) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
         DPQuitBlocks = [NSMutableArray new];
-        atexit(DPRunQuitBlocks);
         [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationWillTerminateNotification object:nil queue:nil
                                                     usingBlock:^(NSNotification *_) { DPRunQuitBlocks(); }];
-    }
-    [DPQuitBlocks addObject:block];
+        atexit(DPRunQuitBlocks);
+    });
+    @synchronized(DPQuitBlocks) { [DPQuitBlocks addObject:[block copy]]; }
 }
 
 // Menu items hold their target weakly; representedObject keeps it alive.
