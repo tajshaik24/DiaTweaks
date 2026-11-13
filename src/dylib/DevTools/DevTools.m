@@ -104,6 +104,6 @@ void DPInstallDevTools(void) {
         [debug addItem:DPMenuItem(@"Stop Pretending", ^{ [DPUpdates.shared stopPretending]; })];
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"Debug" action:nil keyEquivalent:@""];
         item.submenu = debug;
-        [NSApp.mainMenu insertItem:item atIndex:1];
+        [NSApp.mainMenu addItem:item];
     });
 }
