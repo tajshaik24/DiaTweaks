@@ -75,6 +75,26 @@ static void DPFetchBeforeChromium(void) {
     });
 }
 
+// After an update that pins a newer uBlock Origin: fetch it as Dia starts and swap it in before Chromium reads its
+// extensions, so the update's own relaunch is the only one. If it's slow, this launch keeps the release already in
+// place, and the new one, finished in the staging folder, takes over at the next.
+static void DPUpgradeBeforeChromium(void) {
+    static const int64_t kWait = 10 * NSEC_PER_SEC;
+    dispatch_semaphore_t ready = dispatch_semaphore_create(0);
+    __block NSString *problem = @"not finished";
+    // Not from here directly: this runs while dyld is still loading Dia, and starting the network then deadlocks.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        DPFetchUBlock(DPUBlockStaging(), ^(NSString *fetched) {
+            if (fetched) NSLog(@"DiaPatches: couldn't fetch the new uBlock Origin: %@", fetched);
+            problem = fetched;
+            dispatch_semaphore_signal(ready);
+        });
+    });
+    DPBeforeExtensionsLoad(^{
+        if (dispatch_semaphore_wait(ready, dispatch_time(DISPATCH_TIME_NOW, kWait)) == 0 && !problem) DPPromoteStagedUBlock();
+    });
+}
+
 static void DPInstallUBlockOrigin(void) {
     NSFileManager *files = NSFileManager.defaultManager;
     if (!DPUBlockOrigin.on) {
@@ -94,12 +114,7 @@ static void DPInstallUBlockOrigin(void) {
     DPLoadExtension(DPUBlockFolder());
     gRunning = YES;
     DPWatchUBlockStart();
-    // A newer pinned release waits beside this one and takes over at the next launch, with no prompt.
-    if (!DPUBlockDownloaded()) DPOnLaunch(^{
-        DPFetchUBlock(DPUBlockStaging(), ^(NSString *problem) {
-            if (problem) NSLog(@"DiaPatches: couldn't stage the new uBlock Origin: %@", problem);
-        });
-    });
+    if (!DPUBlockDownloaded()) DPUpgradeBeforeChromium();
 }
 
 BOOL DPUBlockRunning(void) { return gRunning; }
