@@ -1,6 +1,6 @@
 #import "Patches/TabBarDock/Layout.h"
 
-static char DPDiaWidthKey, DPHiddenKey, DPShiftedFrameKey, DPShiftKey;
+static char DPDiaWidthKey, DPHiddenKey, DPShiftedFrameKey, DPShiftKey, DPPinnedHiddenKey;
 static const CGFloat DPPillPadding = 10;
 static BOOL DPSizing;  // Set while this resizes the box itself, so only Dia's sizes are remembered.
 
@@ -21,10 +21,26 @@ static CGFloat DPDiaWidth(NSView *dock) {
     return width ? width.doubleValue : NSWidth(dock.frame);
 }
 
-// Dia sizes the box to the switcher plus the pinned tabs, so it's empty when it's no wider than the switcher.
+// Dia sizes the box to the switcher plus the pinned tabs, so it's empty when it's no wider than the switcher,
+// or when this hides the pinned tabs.
 static BOOL DPDockIsEmpty(NSView *dock) {
     NSView *switcher = DPSubview(dock, DPDiaTabStripSwitcher);
-    return switcher && DPDiaWidth(dock) - NSWidth(switcher.frame) < 1 && !DPSubview(dock, DPDiaPinnedTab);
+    return switcher && (DPHidePinnedTabsInTabBar.on || DPDiaWidth(dock) - NSWidth(switcher.frame) < 1);
+}
+
+// The box keeps its pinned tabs in TabSurface's dock, the one the sidebar uses too; only the box's copies hide.
+static void DPHidePinnedTabs(NSView *dock) {
+    for (NSView *sub in dock.subviews) {
+        if (!DPIsKind(sub, "_TtC10TabSurface11TabDockView")) continue;
+        BOOL ours = [DPGet(sub, &DPPinnedHiddenKey) boolValue];
+        if (DPHidePinnedTabsInTabBar.on && !sub.hidden) {
+            sub.hidden = YES;
+            DPSet(sub, &DPPinnedHiddenKey, @YES);
+        } else if (!DPHidePinnedTabsInTabBar.on && ours) {
+            sub.hidden = NO;
+            DPSet(sub, &DPPinnedHiddenKey, nil);
+        }
+    }
 }
 
 static CGFloat DPFirstTabX(NSView *strip) {
@@ -82,8 +98,9 @@ void DPUpdateTabBar(NSView *root) {
     } else {
         NSView *switcher = DPSubview(dock, DPDiaTabStripSwitcher);
         NSView *pinned = DPSubview(dock, "_TtC10TabSurface11TabDockView");
-        CGFloat end = MAX(NSMaxX(switcher.frame), pinned && NSWidth(pinned.frame) > 0 ? NSMaxX(pinned.frame) : 0);
-        if (DPHideProfileName.on && end > 0 && end < diaWidth && DPMayAdjust(dock)) DPSizeDock(dock, end);
+        BOOL pinnedShow = pinned && !pinned.hidden && NSWidth(pinned.frame) > 0;
+        CGFloat end = MAX(NSMaxX(switcher.frame), pinnedShow ? NSMaxX(pinned.frame) : 0);
+        if ((DPHideProfileName.on || DPHidePinnedTabsInTabBar.on) && end > 0 && end < diaWidth && DPMayAdjust(dock)) DPSizeDock(dock, end);
         shift = MAX(0, diaWidth - NSWidth(dock.frame));
     }
     DPShiftStrip(strip, shift);
@@ -115,6 +132,7 @@ static void DPSwitcher_layout(NSView *self, SEL _cmd) {
 
 static void DPDock_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPDock_layout, self);
+    DPHidePinnedTabs(self);
     DPNarrowSwitcher(self);
     if (!DPSizing && self.superview) {
         DPSizing = YES;
@@ -125,7 +143,8 @@ static void DPDock_layout(NSView *self, SEL _cmd) {
 
 void DPUpdateTabBars(DPPatch *patch) {
     for (NSView *dock in DPFindViews(DPDiaTabStripDock)) {
-        if (!patch->on || patch == &DPHideProfileName) DPSizeDock(dock, DPDiaWidth(dock));
+        DPSizeDock(dock, DPDiaWidth(dock));
+        DPHidePinnedTabs(dock);
         dock.needsLayout = YES;
         DPSubview(dock, DPDiaTabStripSwitcher).needsLayout = YES;
         [dock layoutSubtreeIfNeeded];
@@ -144,6 +163,10 @@ NSString *DPVerifyTabBars(DPPatch *patch) {
             CGFloat first = DPFirstTabX(strip);
             if (hiddenByUs && first < CGFLOAT_MAX && fabs([strip convertPoint:NSMakePoint(first, 0) toView:root].x - NSMinX(dock.frame)) > 1)
                 return @"tabs didn't move into the box's place";
+        } else if (patch == &DPHidePinnedTabsInTabBar) {
+            for (NSView *sub in dock.subviews)
+                if (DPIsKind(sub, "_TtC10TabSurface11TabDockView") && patch->on && !sub.hidden) return @"pinned tabs still show in the tab bar";
+                else if (DPIsKind(sub, "_TtC10TabSurface11TabDockView") && !patch->on && [DPGet(sub, &DPPinnedHiddenKey) boolValue]) return @"pinned tabs still hidden";
         } else if (!dock.hidden) {
             NSView *names = DPSubview(DPSubview(dock, DPDiaTabStripSwitcher), "_TtGC5ARCUI22FeatheredContainerViewCSo6NSView_");
             if (names && names.hidden != patch->on) return patch->on ? @"profile name still shows" : @"profile name still hidden";
