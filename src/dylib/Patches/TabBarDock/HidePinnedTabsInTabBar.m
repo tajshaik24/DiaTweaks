@@ -4,7 +4,7 @@ DP_PATCH(DPHidePinnedTabsInTabBar) {
     .key = @"hidePinnedTabsInTabBar",
     .order = 84,
     .title = @"Hide Pinned Tabs in Tab Bar",
-    .detail = @"Keep pinned tabs out of the box beside the window buttons, and move the tabs up to it. They stay pinned, and show again with tabs in the sidebar.",
+    .detail = @"Take the pinned tabs, and the box with the profile name that holds them, out of the tab bar, and move the tabs up beside the window buttons. They stay pinned, and show again with tabs in the sidebar.",
     .symbol = @"pin.slash pin",
     .tint = @"systemYellowColor",
     .section = @"Horizontal Tabs",
