@@ -15,7 +15,7 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 | Page | The padding and corners around web pages |
 | Toolbar | The toolbar, its buttons and the address field |
 | Sidebar & Tab Bar | The sidebar, pinned tabs, profiles and tab groups |
-| Horizontal Tabs | The profile box beside the window buttons when tabs are at the top |
+| Horizontal Tabs | Pinned tabs and the profile box beside the window buttons when tabs are at the top |
 | Tabs | Grouping, saving, unloading, closing and reopening tabs |
 | Command Bar | The command bar and what it suggests |
 | New Tab Page | What the new tab page shows |
