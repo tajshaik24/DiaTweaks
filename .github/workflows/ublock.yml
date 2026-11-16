@@ -1,0 +1,20 @@
+name: uBlock Origin
+
+# Once a week, open a pull request that pins the uBlock Origin tweak to uBlock Origin's latest release.
+on:
+  schedule:
+    - cron: "17 9 * * 1"  # Mondays, 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/bump-ublock

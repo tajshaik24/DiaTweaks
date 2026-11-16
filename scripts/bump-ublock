@@ -1,0 +1,74 @@
+#!/bin/sh
+# Pins the uBlock Origin tweak to uBlock Origin's latest stable release and opens a pull request for it.
+# Run weekly by .github/workflows/ublock.yml; needs GH_TOKEN. With --check it only says whether one is due; with
+# --dry-run it downloads, checks and edits Download.m but leaves git alone.
+set -eu
+cd "$(dirname "$0")/.."
+source=src/dylib/Patches/UBlockOrigin/Download.m
+
+pinned=$(sed -n 's/.*kVersion = @"\([^"]*\)".*/\1/p' "$source")
+latest=$(gh api repos/gorhill/uBlock/releases/latest --jq .tag_name)
+if [ "$pinned" = "$latest" ]; then
+    echo "uBlock Origin $pinned is the latest release"
+    exit 0
+fi
+newest=$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -1)
+if [ "$newest" != "$latest" ]; then
+    echo "uBlock Origin's latest release, $latest, is older than the pinned $pinned: leaving it"
+    exit 0
+fi
+echo "uBlock Origin $latest is out; the tweak pins $pinned"
+[ "${1:-}" != --check ] || exit 0
+
+branch="ublock-origin-$latest"
+if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+    echo "$branch is already pushed, so its pull request is waiting"
+    exit 0
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+curl -fsSL -o "$work/ublock.zip" "https://github.com/gorhill/uBlock/releases/download/$latest/uBlock0_$latest.chromium.zip"
+digest=$(python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$work/ublock.zip")
+unzip -q "$work/ublock.zip" -d "$work/x"
+# The tweak loads the Manifest V2 uBlock Origin from this folder; anything else needs a person to look first.
+python3 -I - "$work/x/uBlock0.chromium/manifest.json" "$latest" <<'EOF'
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+problems = []
+if manifest.get("manifest_version") != 2: problems.append(f"manifest_version is {manifest.get('manifest_version')}, not 2")
+if manifest.get("name") != "uBlock Origin": problems.append(f"name is {manifest.get('name')!r}")
+if manifest.get("version") != sys.argv[2]: problems.append(f"version is {manifest.get('version')!r}")
+if problems: sys.exit("uBlock0.chromium doesn't look like the release the tweak expects: " + "; ".join(problems))
+EOF
+
+python3 -I - "$source" "$pinned" "$latest" "$digest" <<'EOF'
+import re, sys
+path, pinned, latest, digest = sys.argv[1:]
+text = open(path).read()
+text = text.replace(f'kVersion = @"{pinned}"', f'kVersion = @"{latest}"', 1)
+text, count = re.subn(r'kSHA256 = @"[0-9a-f]{64}"', f'kSHA256 = @"{digest}"', text, count=1)
+if count != 1: sys.exit("couldn't find kSHA256 in " + path)
+open(path, "w").write(text)
+EOF
+
+if [ "${1:-}" = --dry-run ]; then
+    echo "pinned $latest ($digest) in $source; not committing (--dry-run)"
+    exit 0
+fi
+git switch -c "$branch"
+git add "$source"
+git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+    commit -q -m "chore(dylib): pin uBlock Origin $latest"
+git push -q origin "$branch"
+gh pr create --base main --head "$branch" --title "Pin uBlock Origin $latest" --body "## What
+
+Pins the uBlock Origin tweak to [uBlock Origin $latest](https://github.com/gorhill/uBlock/releases/tag/$latest), up from $pinned. The download's SHA-256 is \`$digest\`, and its manifest is still the Manifest V2 uBlock Origin.
+
+## Why
+
+The weekly uBlock Origin check found a newer release.
+
+## Next
+
+Merge, then make a release. Installs keep running $pinned until then; after that, each Mac downloads $latest in the background and switches to it at its next restart."
