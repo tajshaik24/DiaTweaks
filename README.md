@@ -22,6 +22,7 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 | Window | How the window looks and behaves |
 | Passwords | Password managers and passkeys |
 | Links | Opening links in Peek and the address shown on hover |
+| Privacy | Blocking ads and trackers with the full uBlock Origin |
 
 Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it.
 
