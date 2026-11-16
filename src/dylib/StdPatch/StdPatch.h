@@ -102,6 +102,9 @@ float DPZoomStep(float now, int direction);
 
 // Chromium reads extensions and launch flags once as Dia starts: call DPLoadExtension and DPAddLaunchFlag from an `install`.
 void DPLoadExtension(NSString *folder);
+void DPUnloadExtension(NSString *folder);
+// Runs on the main thread just before Chromium reads its launch flags, which is the last moment to add an extension.
+void DPBeforeExtensionsLoad(void (^block)(void));
 void DPAddLaunchFlag(NSString *flag);
 void DPDropLaunchFeature(NSString *feature);  // From a tweak that is off, for a feature it adds when on.
 

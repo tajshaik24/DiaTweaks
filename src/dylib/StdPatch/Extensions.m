@@ -1,6 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
 static NSMutableArray<NSString *> *DPExtensionFolders, *DPLaunchFlags, *DPDroppedFeatures;
+static NSMutableArray<void (^)(void)> *DPBeforeLoad;
 
 // Chromium keeps only the last of a flag, so a list flag given more than once becomes one listing every value.
 static void DPMergeListFlag(NSMutableArray<NSString *> *args, NSString *flag) {
@@ -30,6 +31,8 @@ static void DPDropFeatures(NSMutableArray<NSString *> *args) {
 static id DPConfiguration_init(id self, SEL _cmd, int argc, NSArray<NSString *> *argv, NSString *profilePath, NSUInteger applicationID,
                                BOOL isProduction, NSUInteger restorationPolicy, BOOL loadAllProfiles, BOOL quitRunLoop, NSString *suiteName) {
     static NSString *const flag = @"--load-extension=";
+    for (void (^block)(void) in DPBeforeLoad) block();
+    [DPBeforeLoad removeAllObjects];
     NSMutableArray<NSString *> *args = [argv mutableCopy], *folders = [NSMutableArray array];
     for (NSString *arg in argv)
         if ([arg hasPrefix:flag]) {
@@ -51,6 +54,7 @@ static void DPHookConfiguration(void) {
     DPExtensionFolders = [NSMutableArray array];
     DPLaunchFlags = [NSMutableArray array];
     DPDroppedFeatures = [NSMutableArray array];
+    DPBeforeLoad = [NSMutableArray array];
     DPHook("ArcBrowserApplicationConfiguration", @selector(init:argv:profilePath:applicationID:isProduction:sessionRestorationPolicy:shouldLoadAllProfilesAtStartup:quitRunLoopOnTermination:userDefaultsSuiteName:),
            (IMP)DPConfiguration_init);
 }
@@ -68,4 +72,13 @@ void DPAddLaunchFlag(NSString *flag) {
 void DPDropLaunchFeature(NSString *feature) {
     DPHookConfiguration();
     if (![DPDroppedFeatures containsObject:feature]) [DPDroppedFeatures addObject:feature];
+}
+
+void DPUnloadExtension(NSString *folder) {
+    [DPExtensionFolders removeObject:folder];
+}
+
+void DPBeforeExtensionsLoad(void (^block)(void)) {
+    DPHookConfiguration();
+    [DPBeforeLoad addObject:[block copy]];
 }

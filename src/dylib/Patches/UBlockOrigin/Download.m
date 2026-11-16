@@ -11,11 +11,25 @@ static NSString *const kKey =
     @"s9zGLqRiIEceQQEwTyabwSyEE/a56GpmyEcyvwyU/NXXUFrtvzXD7xF1KC3N+5ZRDvps4kAwIDAQAB";
 
 NSString *DPUBlockFolder(void) { return DPAppSupport(@"DiaPatches/ublock-origin"); }
+NSString *DPUBlockStaging(void) { return DPAppSupport(@"DiaPatches/ublock-origin.next"); }
 
-static NSString *DPVersionFile(void) { return [DPUBlockFolder() stringByAppendingPathComponent:@".diatweaks-version"]; }
+static BOOL DPIsCurrent(NSString *folder) {
+    NSString *file = [folder stringByAppendingPathComponent:@".diatweaks-version"];
+    return [[NSString stringWithContentsOfFile:file encoding:NSUTF8StringEncoding error:nil] isEqualToString:kVersion];
+}
 
-BOOL DPUBlockDownloaded(void) {
-    return [[NSString stringWithContentsOfFile:DPVersionFile() encoding:NSUTF8StringEncoding error:nil] isEqualToString:kVersion];
+BOOL DPUBlockDownloaded(void) { return DPIsCurrent(DPUBlockFolder()); }
+
+BOOL DPUBlockInstalled(void) {
+    return [NSFileManager.defaultManager fileExistsAtPath:[DPUBlockFolder() stringByAppendingPathComponent:@"manifest.json"]];
+}
+
+// A newer release downloaded while an older one ran takes over before Chromium starts.
+void DPPromoteStagedUBlock(void) {
+    NSFileManager *files = NSFileManager.defaultManager;
+    if (!DPIsCurrent(DPUBlockStaging())) return (void)[files removeItemAtPath:DPUBlockStaging() error:nil];
+    [files removeItemAtPath:DPUBlockFolder() error:nil];
+    [files moveItemAtPath:DPUBlockStaging() toPath:DPUBlockFolder() error:nil];
 }
 
 static NSString *DPHex(NSData *data) {
@@ -26,7 +40,7 @@ static NSString *DPHex(NSData *data) {
     return hex;
 }
 
-static NSString *DPUnpack(NSData *zip) {
+static NSString *DPUnpack(NSData *zip, NSString *destination) {
     NSFileManager *files = NSFileManager.defaultManager;
     NSString *work = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
     NSString *archive = [work stringByAppendingPathComponent:@"ublock.zip"], *unzipped = [work stringByAppendingPathComponent:@"x"];
@@ -42,20 +56,25 @@ static NSString *DPUnpack(NSData *zip) {
     if (![[NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:nil] writeToFile:manifestPath atomically:YES]
         || ![kVersion writeToFile:[extension stringByAppendingPathComponent:@".diatweaks-version"] atomically:YES encoding:NSUTF8StringEncoding error:nil])
         return @"uBlock Origin couldn't be set up.";
-    [files createDirectoryAtPath:DPUBlockFolder().stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
-    [files removeItemAtPath:DPUBlockFolder() error:nil];
-    BOOL moved = [files moveItemAtPath:extension toPath:DPUBlockFolder() error:nil];
+    [files createDirectoryAtPath:destination.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    [files removeItemAtPath:destination error:nil];
+    BOOL moved = [files moveItemAtPath:extension toPath:destination error:nil];
     [files removeItemAtPath:work error:nil];
     return moved ? nil : @"uBlock Origin couldn't be moved into place.";
 }
 
-void DPDownloadUBlock(void (^done)(NSString *problem)) {
+// Calls `done` on a background queue, so a caller may wait for it on the main thread.
+void DPFetchUBlock(NSString *destination, void (^done)(NSString *problem)) {
     NSString *address = [NSString stringWithFormat:@"https://github.com/gorhill/uBlock/releases/download/%@/uBlock0_%@.chromium.zip", kVersion, kVersion];
     [[NSURLSession.sharedSession dataTaskWithURL:[NSURL URLWithString:address] completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSString *problem = nil;
         if (!data || error || ((NSHTTPURLResponse *)response).statusCode != 200) problem = @"uBlock Origin couldn't be downloaded.";
         else if (![DPHex(data) isEqualToString:kSHA256]) problem = @"The uBlock Origin download didn't match the expected release.";
-        else problem = DPUnpack(data);
-        dispatch_async(dispatch_get_main_queue(), ^{ done(problem); });
+        else problem = DPUnpack(data, destination);
+        done(problem);
     }] resume];
+}
+
+void DPDownloadUBlock(void (^done)(NSString *problem)) {
+    DPFetchUBlock(DPUBlockFolder(), ^(NSString *problem) { dispatch_async(dispatch_get_main_queue(), ^{ done(problem); }); });
 }

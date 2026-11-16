@@ -7,5 +7,12 @@ extern DPPatch DPUBlockOrigin;
 NSString *DPOpenMV2Gates(void);
 
 NSString *DPUBlockFolder(void);
-BOOL DPUBlockDownloaded(void);
-void DPDownloadUBlock(void (^done)(NSString *problem));
+NSString *DPUBlockStaging(void);
+BOOL DPUBlockDownloaded(void);  // The release this DiaTweaks pins is in place.
+BOOL DPUBlockInstalled(void);   // Some release is in place.
+void DPPromoteStagedUBlock(void);
+void DPFetchUBlock(NSString *destination, void (^done)(NSString *problem));
+void DPDownloadUBlock(void (^done)(NSString *problem));  // Into place, `done` on the main thread.
+void DPWatchUBlockStart(void);
+BOOL DPUBlockRunning(void);  // Handed to Chromium at this launch.
+void DPAskToRelaunch(BOOL on);
