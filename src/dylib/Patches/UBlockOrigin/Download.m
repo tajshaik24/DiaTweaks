@@ -40,9 +40,18 @@ static NSString *DPHex(NSData *data) {
     return hex;
 }
 
+static NSString *DPUnpackIn(NSString *work, NSData *zip, NSString *destination);
+
+// The download is unpacked in a folder of its own, which goes whether or not unpacking worked.
 static NSString *DPUnpack(NSData *zip, NSString *destination) {
-    NSFileManager *files = NSFileManager.defaultManager;
     NSString *work = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSString *problem = DPUnpackIn(work, zip, destination);
+    [NSFileManager.defaultManager removeItemAtPath:work error:nil];
+    return problem;
+}
+
+static NSString *DPUnpackIn(NSString *work, NSData *zip, NSString *destination) {
+    NSFileManager *files = NSFileManager.defaultManager;
     NSString *archive = [work stringByAppendingPathComponent:@"ublock.zip"], *unzipped = [work stringByAppendingPathComponent:@"x"];
     [files createDirectoryAtPath:unzipped withIntermediateDirectories:YES attributes:nil error:nil];
     if (![zip writeToFile:archive atomically:NO]) return @"The download couldn't be saved.";
@@ -59,7 +68,6 @@ static NSString *DPUnpack(NSData *zip, NSString *destination) {
     [files createDirectoryAtPath:destination.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     [files removeItemAtPath:destination error:nil];
     BOOL moved = [files moveItemAtPath:extension toPath:destination error:nil];
-    [files removeItemAtPath:work error:nil];
     return moved ? nil : @"uBlock Origin couldn't be moved into place.";
 }
 
