@@ -154,8 +154,11 @@ static void DPReadPatches(void) {
     qsort(sorted, DPPatchCount, sizeof *sorted, DPCompareOrder);
 }
 
+// DIATWEAKS_DOMAIN lets a test copy of Dia keep its switches apart from yours, as it does for diapatch and diatweaks.
+static NSString *DPSettingsDomain(void) { return @(getenv("DIATWEAKS_DOMAIN") ?: "com.diapatches"); }
+
 void DPLoadPatches(void) {
-    DPDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
+    DPDefaults = [[NSUserDefaults alloc] initWithSuiteName:DPSettingsDomain()];
     DPReadPatches();
 
     for (NSUInteger i = 0; i < DPPatchCount; i++)
@@ -172,7 +175,7 @@ void DPLoadPatches(void) {
 }
 
 static void DPApplySavedSettings(void) {
-    CFPreferencesAppSynchronize(CFSTR("com.diapatches"));
+    CFPreferencesAppSynchronize((__bridge CFStringRef)DPSettingsDomain());
     for (NSUInteger i = 0; i < DPPatchCount; i++) DPSetPatch(DPPatches[i], DPSavedOn(DPPatches[i]), NO);
     [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
 }
