@@ -1,7 +1,6 @@
 #import "Patches/TabBarDock/Layout.h"
 
 static char DPDiaWidthKey, DPHiddenKey, DPShiftedFrameKey, DPShiftKey;
-static const CGFloat DPPillPadding = 10;
 static BOOL DPSizing;  // Set while this resizes the box itself, so only Dia's sizes are remembered.
 
 static void DPSizeDock(NSView *dock, CGFloat width) {
@@ -44,28 +43,16 @@ static CGFloat DPAppliedShift(NSView *strip) {
     return ours && NSEqualRects(ours.rectValue, strip.frame) ? [DPGet(strip, &DPShiftKey) doubleValue] : 0;
 }
 
-// Without the name the pill only needs room for the page dots, centred.
-static void DPNarrowSwitcher(NSView *dock) {
-    NSView *switcher = DPSubview(dock, DPDiaTabStripSwitcher);
-    NSView *names = DPSubview(switcher, "_TtGC5ARCUI22FeatheredContainerViewCSo6NSView_");
-    NSView *dots = DPFindView(switcher, ^BOOL(NSView *view) { return DPIsKind(view, "_TtC8TabStrip17PageIndicatorView"); });
-    NSView *pinned = DPSubview(dock, "_TtC10TabSurface11TabDockView");
-    if (!switcher || !names) return;
-    names.hidden = DPHideProfileName.on;
-    if (!DPHideProfileName.on || !DPMayAdjust(switcher)) return;
-    CGFloat width = MAX(NSHeight(switcher.frame), (dots && !dots.hidden ? NSWidth(dots.frame) : 0) + 2 * DPPillPadding);
-    CGFloat saved = NSWidth(switcher.frame) - width;
-    if (saved <= 0) return;
-    [switcher setFrameSize:NSMakeSize(width, NSHeight(switcher.frame))];
-    if (pinned) [pinned setFrameOrigin:NSMakePoint(NSMinX(pinned.frame) - saved, NSMinY(pinned.frame))];
+// Once the toggles leave the box with neither pinned tabs nor a name to show, it goes: dots alone don't keep it.
+static BOOL DPDockEmpty(NSView *dock) {
+    return (DPHidePinnedTabsInTabBar.on || DPHideProfileName.on) && !DPPinnedTabsShow(dock) && !DPProfileNameShows(dock);
 }
 
 void DPUpdateTabBar(NSView *root) {
     NSView *dock = DPSubview(root, DPDiaTabStripDock), *strip = DPStripIn(root);
     if (!dock || !strip) return;
     BOOL hiddenByUs = [DPGet(dock, &DPHiddenKey) boolValue];
-    // Without its pinned tabs the box would only hold the profile pill, so the whole box goes.
-    BOOL collapse = DPHidePinnedTabsInTabBar.on && (hiddenByUs || !dock.hidden);
+    BOOL collapse = DPDockEmpty(dock) && (hiddenByUs || !dock.hidden);
     if (collapse != hiddenByUs) {
         dock.hidden = collapse;
         DPSet(dock, &DPHiddenKey, collapse ? @YES : nil);
@@ -75,10 +62,11 @@ void DPUpdateTabBar(NSView *root) {
         CGFloat first = DPFirstTabX(strip);
         if (first < CGFLOAT_MAX) shift = MAX(0, [strip convertPoint:NSMakePoint(first, 0) toView:root].x + DPAppliedShift(strip) - NSMinX(dock.frame));
     } else {
-        NSView *switcher = DPSubview(dock, DPDiaTabStripSwitcher);
-        NSView *pinned = DPSubview(dock, "_TtC10TabSurface11TabDockView");
-        CGFloat end = MAX(NSMaxX(switcher.frame), pinned && NSWidth(pinned.frame) > 0 ? NSMaxX(pinned.frame) : 0);
-        if (DPHideProfileName.on && end > 0 && end < diaWidth && DPMayAdjust(dock)) DPSizeDock(dock, end);
+        // What's left decides the box's width: the pill, and the pinned tabs unless they're hidden.
+        NSView *switcher = DPSubview(dock, DPDiaTabStripSwitcher), *pinned = DPPinnedTabsIn(dock);
+        CGFloat end = MAX(NSMaxX(switcher.frame), DPPinnedTabsShow(dock) ? NSMaxX(pinned.frame) : 0);
+        BOOL toggled = DPHidePinnedTabsInTabBar.on || DPHideProfileName.on;
+        if (toggled && end > 0 && end < diaWidth && DPMayAdjust(dock)) DPSizeDock(dock, end);
         shift = MAX(0, diaWidth - NSWidth(dock.frame));
     }
     DPShiftStrip(strip, shift);
@@ -89,7 +77,7 @@ static void DPRoot_layout(NSView *self, SEL _cmd) {
     DPUpdateTabBar(self);
 }
 
-// Dia sets the box's size from its own model; remember it, and narrow the box again if the name is hidden.
+// Dia sets the box's size from its own model; remember it, and narrow the box again if the toggles call for it.
 static void DPDock_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
     if (!DPSizing) DPSet(self, &DPDiaWidthKey, @(size.width));
     DPCallOriginal(DPDock_setFrameSize, self, size);
@@ -100,16 +88,14 @@ static void DPDock_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
     }
 }
 
-// The switcher puts its dots under the name; with the name gone they sit in the middle of the pill.
 static void DPSwitcher_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPSwitcher_layout, self);
-    NSView *dots = DPFindView(self, ^BOOL(NSView *view) { return DPIsKind(view, "_TtC8TabStrip17PageIndicatorView"); });
-    if (!DPHideProfileName.on || !dots || !DPIsKind(self.superview, DPDiaTabStripDock)) return;
-    [dots setFrameOrigin:NSMakePoint(round((NSWidth(self.bounds) - NSWidth(dots.frame)) / 2), round((NSHeight(self.bounds) - NSHeight(dots.frame)) / 2))];
+    DPCenterDots(self);
 }
 
 static void DPDock_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPDock_layout, self);
+    DPHidePinnedTabs(self);
     DPNarrowSwitcher(self);
     if (!DPSizing && self.superview) {
         DPSizing = YES;
@@ -121,6 +107,7 @@ static void DPDock_layout(NSView *self, SEL _cmd) {
 void DPUpdateTabBars(DPPatch *patch) {
     for (NSView *dock in DPFindViews(DPDiaTabStripDock)) {
         DPSizeDock(dock, DPDiaWidth(dock));
+        DPHidePinnedTabs(dock);
         dock.needsLayout = YES;
         DPSubview(dock, DPDiaTabStripSwitcher).needsLayout = YES;
         [dock layoutSubtreeIfNeeded];
@@ -134,15 +121,16 @@ NSString *DPVerifyTabBars(DPPatch *patch) {
         if (!root.window.isVisible || !dock || !strip) continue;
         BOOL hiddenByUs = [DPGet(dock, &DPHiddenKey) boolValue];
         if (patch == &DPHidePinnedTabsInTabBar) {
-            if (patch->on && !dock.hidden) return @"pinned tabs still show in the tab bar";
-            if (!patch->on && hiddenByUs) return @"pinned tabs still hidden";
-            CGFloat first = DPFirstTabX(strip);
-            if (hiddenByUs && first < CGFLOAT_MAX && fabs([strip convertPoint:NSMakePoint(first, 0) toView:root].x - NSMinX(dock.frame)) > 1)
-                return @"tabs didn't move into the box's place";
-        } else if (!dock.hidden) {
-            NSView *names = DPSubview(DPSubview(dock, DPDiaTabStripSwitcher), "_TtGC5ARCUI22FeatheredContainerViewCSo6NSView_");
-            if (names && names.hidden != patch->on) return patch->on ? @"profile name still shows" : @"profile name still hidden";
+            if (patch->on && !hiddenByUs && DPPinnedTabsShow(dock)) return @"pinned tabs still show in the tab bar";
+            if (!patch->on && DPPinnedTabsHiddenByUs(dock)) return @"pinned tabs still hidden";
+        } else if (!hiddenByUs && DPProfileNameHidden(dock) != patch->on) {
+            return patch->on ? @"profile name still shows" : @"profile name still hidden";
         }
+        if (DPDockEmpty(dock) && !dock.hidden) return @"the box beside the window buttons shows with nothing in it";
+        if (hiddenByUs && !DPDockEmpty(dock)) return @"the box beside the window buttons is hidden with something to show";
+        CGFloat first = DPFirstTabX(strip);
+        if (hiddenByUs && first < CGFLOAT_MAX && fabs([strip convertPoint:NSMakePoint(first, 0) toView:root].x - NSMinX(dock.frame)) > 1)
+            return @"tabs didn't move into the box's place";
     }
     return nil;
 }
