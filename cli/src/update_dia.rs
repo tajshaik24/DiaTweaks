@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 
 use crate::{
     child::OnInterrupt,
@@ -49,12 +49,12 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
         }
         (None, None) => {
             let Some(official) = status.official else {
-                return Err(spinner.fail(anyhow::anyhow!(
+                return Err(spinner.fail(anyhow!(
                     "DiaTweaks has no copy of the official Dia. Run install.sh to set it up again."
                 )));
             };
             if status.feed.is_none() {
-                return Err(spinner.fail(anyhow::anyhow!(
+                return Err(spinner.fail(anyhow!(
                     "Couldn't reach Dia's update feed. Check your internet connection, then try again."
                 )));
             }
@@ -74,7 +74,13 @@ fn download(env: &Env, ui: &Ui, diapatch: &Diapatch, latest: &str) -> Result<Str
         "Downloading and patching Dia {latest}. This can take a few minutes"
     ));
     let done = spinner.check(diapatch.run(&["update"], OnInterrupt::StopDownloads, &spinner))?;
-    let staged = dia::version_of(&env.staged());
+    let staged = (done.status.success() || signals::interrupted())
+        .then(|| {
+            dia::staged_ready(&env.support)
+                .then(|| dia::version_of(&env.staged()))
+                .flatten()
+        })
+        .flatten();
     match (staged, signals::interrupted()) {
         (Some(staged), true) => Err(spinner.fail(
             Cancelled(format!(
@@ -87,9 +93,7 @@ fn download(env: &Env, ui: &Ui, diapatch: &Diapatch, latest: &str) -> Result<Str
             spinner.stop(format_args!("Dia {staged} is ready"));
             Ok(staged)
         }
-        (None, false) => {
-            Err(spinner.fail(anyhow::anyhow!("Couldn't update Dia:\n{}", done.tail(5))))
-        }
+        (None, false) => Err(spinner.fail(anyhow!("Couldn't update Dia:\n{}", done.tail(5)))),
     }
 }
 
@@ -104,7 +108,7 @@ fn install(env: &Env, ui: &Ui, diapatch: &Diapatch, ready: &str) -> Result<()> {
         let done =
             spinner.check(diapatch.run(&["apply"], OnInterrupt::Finish(FINISHING), &spinner))?;
         if !done.status.success() {
-            return Err(spinner.fail(anyhow::anyhow!("Couldn't install Dia:\n{}", done.tail(5))));
+            return Err(spinner.fail(anyhow!("Couldn't install Dia:\n{}", done.tail(5))));
         }
         spinner.check(installed(env, ready))?;
         spinner.stop(format_args!("Installed Dia {ready}"));
@@ -112,13 +116,14 @@ fn install(env: &Env, ui: &Ui, diapatch: &Diapatch, ready: &str) -> Result<()> {
         return Ok(());
     }
     if !ui.choose("Relaunch Dia now to install it?", true)? {
-        match dia::is_patched(&env.app) {
-            true => ui.done(format_args!(
+        if dia::is_patched(&env.app) {
+            ui.done(format_args!(
                 "Dia {ready} installs the next time you quit Dia."
-            )),
-            false => ui.done(format_args!(
+            ));
+        } else {
+            ui.done(format_args!(
                 "Quit Dia, then run `diatweaks update-dia` to install Dia {ready}."
-            )),
+            ));
         }
         return Ok(());
     }
@@ -130,7 +135,7 @@ fn install(env: &Env, ui: &Ui, diapatch: &Diapatch, ready: &str) -> Result<()> {
         &spinner,
     ))?;
     if !done.status.success() {
-        return Err(spinner.fail(anyhow::anyhow!("Couldn't install Dia:\n{}", done.tail(5))));
+        return Err(spinner.fail(anyhow!("Couldn't install Dia:\n{}", done.tail(5))));
     }
     spinner.check(installed(env, ready))?;
     spinner.stop(format_args!("Installed Dia {ready} and reopened it"));
@@ -138,7 +143,7 @@ fn install(env: &Env, ui: &Ui, diapatch: &Diapatch, ready: &str) -> Result<()> {
     Ok(())
 }
 
-/// diapatch exits 0 when it drops the staged build for a hand-installed official Dia, so check the Dia in place.
+// diapatch exits 0 if it drops the staged build for a hand-installed official Dia.
 fn installed(env: &Env, ready: &str) -> Result<()> {
     let Some(now) = dia::version_of(&env.app) else {
         bail!(
