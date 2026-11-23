@@ -1,7 +1,7 @@
 name: Sync upstream
 
 # Every day, merge JaceThings/DiaTweaks, pin uBlock Origin's latest release, check the build, and publish a
-# v<upstream>-taj.<n> release when anything changed. When the merge conflicts or a check fails, Claude tries to fix
+# v<upstream>.<n> release (such as v1.2.0.2) when anything changed. When the merge conflicts or a check fails, Claude tries to fix
 # it on this runner; the release still goes out only if the checks then pass, and otherwise an issue is opened.
 # Building and testing need macOS, whose runners can queue for a long time, so a quick Linux job decides first
 # whether there's anything to do; on most days there isn't, and no Mac is asked for.

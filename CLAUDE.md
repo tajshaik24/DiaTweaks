@@ -12,7 +12,7 @@ When the user mentions updating in this folder, do all of these in order:
 
 ## The daily sync and its "Upstream sync needs a hand" issue
 
-`.github/workflows/sync.yml` runs `scripts/sync-upstream` every day: it merges `upstream/main`, pins uBlock Origin's latest release, runs `make check` and the CLI tests, and publishes the next `v<upstream>-taj.<n>` release. When a merge conflicts, a check fails, or a push is refused, it pushes nothing and opens (or comments on) an issue titled "Upstream sync needs a hand". With a `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`) secret, Claude first tries steps 1–3 below on the runner; the workflow re-checks and releases its commits itself, and the issue (with Claude's note) only opens if that still fails. "Run workflow" with **dry run** ticked tries all of it without pushing or releasing.
+`.github/workflows/sync.yml` runs `scripts/sync-upstream` every day: it merges `upstream/main`, pins uBlock Origin's latest release, runs `make check` and the CLI tests, and publishes the next `v<upstream>.<n>` release (four numbers, such as `v1.2.0.2`; releases before 2026-11-23 were named `v<upstream>-taj.<n>`). When a merge conflicts, a check fails, or a push is refused, it pushes nothing and opens (or comments on) an issue titled "Upstream sync needs a hand". With a `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`) secret, Claude first tries steps 1–3 below on the runner; the workflow re-checks and releases its commits itself, and the issue (with Claude's note) only opens if that still fails. "Run workflow" with **dry run** ticked tries all of it without pushing or releasing.
 
 When the user points at that issue, or asks to "pull the main repo" / "make a new release":
 

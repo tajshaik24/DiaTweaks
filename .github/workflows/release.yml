@@ -2,8 +2,9 @@ name: Release
 
 on:
   push:
-    # Only the fork's own tags: upstream's (pushed so release notes diff from them) aren't releases here.
-    tags: ["v*-taj.*"]
+    # Only the fork's own four-number tags (and the -taj ones from before): upstream's three-number tags, pushed so
+    # release notes diff from them, aren't releases here.
+    tags: ["v*.*.*.*", "v*-taj.*"]
   workflow_dispatch:
     inputs:
       tag:
