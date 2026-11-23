@@ -20,6 +20,13 @@ fail() {
     exit 1
 }
 
+# resolved WHY: close that issue once main has caught up, whether this run or a person did it.
+resolved() {
+    [ "$dry_run" != --dry-run ] || return 0
+    issue=$(gh issue list -R "$repo" --state open --search 'in:title "Upstream sync needs a hand"' --json number --jq '.[0].number // empty')
+    [ -z "$issue" ] || gh issue close "$issue" -R "$repo" --comment "$1 ($run_url)"
+}
+
 git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/JaceThings/DiaTweaks.git
 git fetch -q upstream main
 # Upstream sometimes moves an old tag, which a plain fetch refuses to clobber.
@@ -48,15 +55,19 @@ if ! git diff --quiet -- "$ublock"; then
     git commit -q -m "chore(dylib): pin uBlock Origin $pinned" -- "$ublock"
 fi
 
-if [ "$(git rev-parse HEAD)" = "$before" ]; then
-    echo "Nothing new upstream or from uBlock Origin"
+# Release whatever ships and isn't in the last release yet, including a merge someone pushed by hand.
+last=$(git describe --tags --abbrev=0 --match 'v*-taj.*' HEAD 2>/dev/null || true)
+if [ -n "$last" ] && git diff --quiet "$last" HEAD -- src cli assets install.sh Makefile; then
+    echo "Nothing to release since $last"
+    resolved "main has everything from JaceThings/DiaTweaks now, and $last has it all"
     exit 0
 fi
 
 log=$(mktemp)
-if ! { make && make check && cargo test --quiet --manifest-path cli/Cargo.toml; } >"$log" 2>&1; then
+# make check runs once more before it counts as failed: upstream's combinatorial stability suite sometimes flakes.
+if ! { make && { make check || make check; } && cargo test --quiet --manifest-path cli/Cargo.toml; } >"$log" 2>&1; then
     tail -40 "$log"
-    fail "The fork doesn't pass its checks after taking $new upstream commits." \
+    fail "The fork doesn't pass its checks after taking $new upstream commits (and anything unreleased since $last)." \
         "Nothing was pushed. The end of the output:
 
 \`\`\`
@@ -116,3 +127,4 @@ EOF
 # The release makes the tag, with the zip already on it, so a Release run the tag starts finds nothing to do.
 gh release create "$tag" -R "$repo" --target "$(git rev-parse HEAD)" --latest --title "$tag" --notes-file "$notes" build/DiaTweaks.zip
 echo "Published $tag"
+resolved "Synced and published $tag"
