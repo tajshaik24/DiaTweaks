@@ -51,6 +51,7 @@ BOOL DPProfileNameShows(NSView *dock) {
 }
 
 BOOL DPProfileNameHidden(NSView *dock) { return DPNamesIn(dock).hidden; }
+BOOL DPHasProfileName(NSView *dock) { return DPNamesIn(dock) != nil; }
 
 // Without the name the pill only needs room for the profile dots.
 void DPNarrowSwitcher(NSView *dock) {
