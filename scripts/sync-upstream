@@ -1,7 +1,9 @@
 #!/bin/sh
 # Merges JaceThings/DiaTweaks into the fork, pins uBlock Origin's latest release, checks the build, and publishes
 # a v<upstream>-taj.<n> release. Run daily by .github/workflows/sync.yml; needs GH_TOKEN.
-# A merge conflict or a failing check stops it before anything is pushed and opens an issue instead.
+# A merge conflict or a failing check stops it before anything is pushed and opens an issue instead. With
+# SYNC_HANDOFF set, those two write what went wrong to that file and exit 3, so the workflow can let Claude fix
+# them and run this again; SYNC_CLAUDE_NOTE names a file with Claude's account, added to the issue if it still fails.
 # --dry-run merges, bumps and checks, but pushes and releases nothing.
 set -eu
 cd "$(dirname "$0")/.."
@@ -9,11 +11,20 @@ repo=${GITHUB_REPOSITORY:-tajshaik24/DiaTweaks}
 run_url=${GITHUB_SERVER_URL:-https://github.com}/$repo/actions/runs/${GITHUB_RUN_ID:-local}
 dry_run=${1:-}
 
-# fail TITLE BODY: say why the sync stopped, on one open issue that collects every stop until someone closes it.
+# fail TITLE BODY [fixable]: say why the sync stopped, on one open issue that collects every stop until someone
+# closes it, or hand a fixable stop to Claude first.
 fail() {
     echo "$1" >&2
+    if [ "${3:-}" = fixable ] && [ -n "${SYNC_HANDOFF:-}" ]; then
+        printf '%s\n\n%s\n' "$1" "$2" > "$SYNC_HANDOFF"
+        exit 3
+    fi
     [ "$dry_run" != --dry-run ] || exit 1
     body=$(printf '%s\n\n%s\n\nRun: %s' "$1" "$2" "$run_url")
+    if [ -n "${SYNC_CLAUDE_NOTE:-}" ]; then
+        note=$(cat "$SYNC_CLAUDE_NOTE" 2>/dev/null || echo "Claude left no account of what it tried; see the run.")
+        body=$(printf '%s\n\n### Claude tried first\n\n%s' "$body" "$note")
+    fi
     issue=$(gh issue list -R "$repo" --state open --search 'in:title "Upstream sync needs a hand"' --json number --jq '.[0].number // empty')
     if [ -n "$issue" ]; then gh issue comment "$issue" -R "$repo" --body "$body"
     else gh issue create -R "$repo" --title "Upstream sync needs a hand" --body "$body"; fi
@@ -43,7 +54,7 @@ if [ "$new" -gt 0 ]; then
         fail "Merging $new commits from JaceThings/DiaTweaks conflicts with the fork." \
             "These files need merging by hand (ask Claude to \"pull the main repo and make a new release\"):
 
-$conflicts"
+$conflicts" fixable
     fi
 fi
 
@@ -72,7 +83,7 @@ if ! { make && { make check || make check; } && cargo test --quiet --manifest-pa
 
 \`\`\`
 $(grep -E 'error|FAIL|\*\*\*' "$log" | tail -20)
-\`\`\`"
+\`\`\`" fixable
 fi
 
 # The newest upstream release tag the merge contains, then the next -taj number on it.

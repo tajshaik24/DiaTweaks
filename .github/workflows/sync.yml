@@ -1,11 +1,17 @@
 name: Sync upstream
 
 # Every day, merge JaceThings/DiaTweaks, pin uBlock Origin's latest release, check the build, and publish a
-# v<upstream>-taj.<n> release when anything changed. A conflict or failing check opens an issue instead.
+# v<upstream>-taj.<n> release when anything changed. When the merge conflicts or a check fails, Claude tries to fix
+# it on this runner; the release still goes out only if the checks then pass, and otherwise an issue is opened.
 on:
   schedule:
     - cron: "23 10 * * *"  # Daily, 10:23 UTC
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Merge and check (letting Claude fix what it can), but push and release nothing
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -17,11 +23,13 @@ concurrency:
 jobs:
   sync:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       # GITHUB_TOKEN can't push a merge that changes .github/workflows; a SYNC_TOKEN with Contents and Workflows
       # write access can. Without one, such a merge stops with an issue.
       GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+      DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+      HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,4 +38,55 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - run: scripts/sync-upstream
+
+      - id: sync
+        env:
+          SYNC_HANDOFF: ${{ env.HAS_CLAUDE == 'true' && format('{0}/handoff.md', runner.temp) || '' }}
+        run: |
+          code=0
+          scripts/sync-upstream $DRY_RUN || code=$?
+          if [ "$code" -eq 3 ]; then echo "claude=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          exit "$code"
+
+      - name: Let Claude fix the merge
+        if: steps.sync.outputs.claude == 'true'
+        continue-on-error: true
+        timeout-minutes: 45
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --model claude-opus-5-5
+            --max-turns 150
+            --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
+            --disallowedTools "Bash(git push:*),Bash(gh:*),Bash(git tag:*)"
+          prompt: |
+            The daily sync of this fork (tajshaik24/DiaTweaks) with JaceThings/DiaTweaks stopped. Read why in:
+            ${{ runner.temp }}/handoff.md
+
+            Follow steps 1 to 3 of "The daily sync and its "Upstream sync needs a hand" issue" in CLAUDE.md:
+            merge upstream/main if HEAD doesn't contain it yet, resolve every conflict keeping all the fork's own
+            changes on top of upstream's new code, and get `make`, `make check` and
+            `cargo test --manifest-path cli/Cargo.toml` passing. Commit the merge as
+            "Merge JaceThings/DiaTweaks main into the fork" and any follow-up fix as its own conventional commit.
+
+            Don't push, tag, release, open issues, or change anything under .github/: the workflow checks and
+            releases your commits after you finish. If a conflict needs a judgment call about how one of the fork's
+            tweaks should behave, or you can't get the checks to pass, don't commit a guess: abort the merge
+            (`git merge --abort`) and stop.
+
+            Either way, finish by writing a short account to ${{ runner.temp }}/claude-note.md: each conflicted
+            file, what you kept from each side, what you fixed, and anything you weren't sure about.
+
+      # Checks Claude's work from a clean tree, then pushes and releases it, or opens the issue with Claude's note.
+      - name: Check and release Claude's fix
+        if: steps.sync.outputs.claude == 'true'
+        env:
+          SYNC_CLAUDE_NOTE: ${{ runner.temp }}/claude-note.md
+        run: |
+          { echo "## What Claude did"; echo; cat "$SYNC_CLAUDE_NOTE" 2>/dev/null || echo "Claude left no note."; } >> "$GITHUB_STEP_SUMMARY"
+          git merge --abort 2>/dev/null || true
+          git reset -q --hard HEAD
+          scripts/sync-upstream $DRY_RUN
