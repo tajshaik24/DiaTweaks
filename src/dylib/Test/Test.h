@@ -10,3 +10,4 @@ void DPSwitchLayout(void (^done)(BOOL moved));
 NSArray<NSArray<NSString *> *> *DPAutoHideScenarios(NSArray<NSArray<NSString *> *> *all);
 extern NSMutableArray<NSString *> *DPSwitchLog;
 NSString *DPCheckAutoHide(void);
+void DPPrepareWindow(void (^done)(void));

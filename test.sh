@@ -31,22 +31,10 @@ run_dia() {
 }
 
 rm -f "$report"
-saved_windows=$(defaults read "$domain" persistedWindowData 2>/dev/null || true)
 switch_only=${DIAPATCH_TEST_SWITCH_ONLY:+DIAPATCH_TEST_SWITCH_ONLY=1}
-# with_auto_hide true|false: the saved window state with every window's Auto-Hide Tabs set that way.
-with_auto_hide() {
-    printf '%s' "$saved_windows" | python3 -I -c '
-import json, sys
-state = json.load(sys.stdin)
-for window in state.get("windows", []): window["isFocusModeActive"] = sys.argv[1] == "true"
-print(json.dumps(state, separators=(",", ":")))' "$1"
-}
-[ -z "$saved_windows" ] || defaults write "$domain" persistedWindowData -string "$(with_auto_hide false)"
+# Each run sets Auto-Hide Tabs itself (DPPrepareWindow), so nothing depends on window state Dia saved.
 run_dia "$report.shown" ${switch_only:-DIAPATCH_TEST_RUN=shown}
-if [ -n "$saved_windows" ]; then
-    defaults write "$domain" persistedWindowData -string "$(with_auto_hide true)"
-    run_dia "$report.hidden" DIAPATCH_TEST_AUTOHIDE=1 ${switch_only:-DIAPATCH_TEST_RUN=hidden}
-fi
+run_dia "$report.hidden" DIAPATCH_TEST_AUTOHIDE=1 ${switch_only:-DIAPATCH_TEST_RUN=hidden}
 scripts/test-dia stop
 trap - EXIT
 

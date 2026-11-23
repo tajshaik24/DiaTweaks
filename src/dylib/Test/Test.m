@@ -116,7 +116,7 @@ void DPRunTests(NSString *path) {
             [scenarios insertObject:@[@"at launch", DPBits(saved)] atIndex:0];
             [scenarios addObject:@[@"saved settings", DPBits(saved)]];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                DPRunPhases(scenarios, path);
+                DPPrepareWindow(^{ DPRunPhases(scenarios, path); });
             });
         }];
     });
