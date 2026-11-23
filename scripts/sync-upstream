@@ -4,7 +4,8 @@
 # A merge conflict or a failing check stops it before anything is pushed and opens an issue instead. With
 # SYNC_HANDOFF set, those two write what went wrong to that file and exit 3, so the workflow can let Claude fix
 # them and run this again; SYNC_CLAUDE_NOTE names a file with Claude's account, added to the issue if it still fails.
-# --dry-run merges, bumps and checks, but pushes and releases nothing.
+# --dry-run merges, bumps and checks, but pushes and releases nothing. --check only says whether a run is due
+# (new upstream commits, a newer uBlock Origin, or unreleased changes), and runs anywhere, Linux included.
 set -eu
 cd "$(dirname "$0")/.."
 repo=${GITHUB_REPOSITORY:-tajshaik24/DiaTweaks}
@@ -51,6 +52,21 @@ git fetch -q --force origin 'refs/tags/v*:refs/tags/v*' || true
 before=$(git rev-parse HEAD)
 
 new=$(git rev-list --count HEAD..upstream/main)
+if [ "$dry_run" = --check ]; then
+    last=$(git describe --tags --abbrev=0 --match 'v*-taj.*' HEAD 2>/dev/null || true)
+    unreleased=no
+    [ -n "$last" ] && git diff --quiet "$last" HEAD -- src cli assets install.sh Makefile || unreleased=yes
+    ublock_due=no
+    scripts/bump-ublock --check | grep -q ' is out;' && ublock_due=yes
+    echo "upstream commits: $new, newer uBlock Origin: $ublock_due, unreleased changes: $unreleased"
+    due=false
+    [ "$new" -eq 0 ] && [ "$ublock_due" = no ] && [ "$unreleased" = no ] || due=true
+    echo "due=$due"
+    [ -z "${GITHUB_OUTPUT:-}" ] || echo "due=$due" >> "$GITHUB_OUTPUT"
+    # Nothing to do also means any earlier stop is sorted out.
+    [ "$due" = true ] || resolved "main has everything from JaceThings/DiaTweaks now"
+    exit 0
+fi
 if [ "$new" -gt 0 ]; then
     echo "JaceThings/DiaTweaks has $new new commits"
     if ! git merge -q --no-edit -m "Merge JaceThings/DiaTweaks main into the fork" upstream/main; then

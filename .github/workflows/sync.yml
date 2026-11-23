@@ -3,6 +3,8 @@ name: Sync upstream
 # Every day, merge JaceThings/DiaTweaks, pin uBlock Origin's latest release, check the build, and publish a
 # v<upstream>-taj.<n> release when anything changed. When the merge conflicts or a check fails, Claude tries to fix
 # it on this runner; the release still goes out only if the checks then pass, and otherwise an issue is opened.
+# Building and testing need macOS, whose runners can queue for a long time, so a quick Linux job decides first
+# whether there's anything to do; on most days there isn't, and no Mac is asked for.
 on:
   schedule:
     - cron: "23 10 * * *"  # Daily, 10:23 UTC
@@ -21,7 +23,24 @@ concurrency:
   group: sync-upstream
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      due: ${{ steps.check.outputs.due }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: scripts/sync-upstream --check
+
   sync:
+    needs: check
+    # A run started by hand always goes ahead, so a release or a dry run can be forced.
+    if: needs.check.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 90
     env:
