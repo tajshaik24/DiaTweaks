@@ -121,7 +121,7 @@ fi
 git push -q origin HEAD:main ||
     fail "GitHub refused the push of the merged main." \
         "If upstream changed a file in .github/workflows, the default token can't push it: add a SYNC_TOKEN secret (a fine-grained token with Contents and Workflows write access), or push the merge by hand."
-git ls-remote --exit-code --tags origin "refs/tags/$base" >/dev/null 2>&1 || git push -q origin "refs/tags/$base"
+# Upstream's tags stay local: pushing one runs Release as it was at that upstream commit, which drafts a release.
 git tag "$tag"
 
 scripts/package
