@@ -1,4 +1,5 @@
 #import "TurnOffAI.h"
+#import "Patches/HideConnectAppPrompts/HideConnectAppPrompts.h"
 #import "Updates/Updates.h"
 
 #define DPDiaCapabilitiesToolbar "_TtC23AssistantCapabilitiesUI32AssistantCapabilitiesToolbarView"
@@ -81,7 +82,9 @@ static void DPTrack(NSMenuItem *item) {
         DPSet(item, &DPDiaHiddenKey, @(item.hidden));
         [DPAIItems addObject:item];
     }
-    item.hidden = [DPGet(item, &DPDiaHiddenKey) boolValue];
+    BOOL diaHidden = [DPGet(item, &DPDiaHiddenKey) boolValue];
+    BOOL wantHidden = diaHidden || DPTurnOffAI.on;
+    if (item.hidden != wantHidden) item.hidden = diaHidden;
 }
 
 static void DPTrackMenu(NSMenu *menu) {
@@ -126,7 +129,7 @@ static void DPCutOffAIServers(void) {
 }
 
 static void DPOfferRelaunch(DPPatch *patch) {
-    if (patch->on == gCutOff || patch->on != DPSavedOn(patch)) return;
+    if (DPTesting || patch->on == gCutOff || patch->on != DPSavedOn(patch)) return;
     NSAlert *alert = [NSAlert new];
     alert.messageText = patch->on ? @"Relaunch Dia to cut off its AI servers" : @"Relaunch Dia to reconnect its AI servers";
     alert.informativeText = patch->on ? @"Until then, AI is hidden, but Dia can still reach its AI servers." : @"Until then, chat can’t reach them.";
@@ -163,6 +166,7 @@ static void DPApplyTurnOffAI(DPPatch *patch) {
     for (NSView *section in DPMorningBriefs.allObjects) section.hidden = patch->on;
     for (NSViewController *sidebar in DPChatSidebars.allObjects) DPCloseChat(sidebar);
     DPApplyAIRows();
+    if (patch->on) DPDismissConnectAppPrompts();
     DPOfferRelaunch(patch);
 }
 

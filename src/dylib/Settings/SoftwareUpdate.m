@@ -40,6 +40,10 @@ static NSButton *DPButton(NSString *title, id target, SEL action, NSString *part
     return self;
 }
 
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
 - (NSArray<NSString *> *)shown {
     DPUpdates *updates = DPUpdates.shared;
     NSMutableArray *parts = [NSMutableArray new];
@@ -189,7 +193,7 @@ static NSButton *DPButton(NSString *title, id target, SEL action, NSString *part
     }
     NSMutableArray *rows = [NSMutableArray arrayWithObject:DPRow(leading, trailing)];
     NSURL *notes = [found[@"releaseNotes"] isKindOfClass:NSString.class] ? [NSURL URLWithString:found[@"releaseNotes"]] : nil;
-    if (notes)
+    if (notes.scheme.length)
         [rows addObject:DPLinkRow(DPRow(DPLine(@"Release Notes", 13, NSColor.labelColor), DPSymbol(@"arrow.up.right", 11, NSColor.secondaryLabelColor)),
                                   @"Release Notes", ^{ [NSWorkspace.sharedWorkspace openURL:notes]; })];
     return DPGroup(rows);

@@ -41,7 +41,7 @@
 - (void)mouseExited:(NSEvent *)event { self.hovered = NO; [self refresh]; }
 
 - (NSURL *)url {
-    NSURL *url = [(NSObject *)self.page valueForKey:@"url"];
+    NSURL *url = DPValueForKey(self.page, @"url");
     return [url isKindOfClass:NSURL.class] ? url : nil;
 }
 
@@ -52,7 +52,7 @@
     }];
     if (self.field) return;
     NSURL *url = self.url;
-    NSString *title = [(NSObject *)self.page valueForKey:@"title"];
+    NSString *title = DPValueForKey(self.page, @"title");
     NSString *host = url.host.lowercaseString ?: url.absoluteString ?: @"", *rest = @"";
     if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
     if (self.hovered) {
@@ -109,7 +109,10 @@
     self.field = nil;
     self.label.hidden = NO;
     for (NSView *view = self.superview; view; view = view.superview)
-        if ([view isKindOfClass:DPPeekCard.class]) [self.window makeFirstResponder:((DPPeekCard *)view).host];
+        if ([view isKindOfClass:DPPeekCard.class]) {
+            DPPeekCard *card = (DPPeekCard *)view;
+            if (!card.closing && !card.isHiddenOrHasHiddenAncestor) [self.window makeFirstResponder:card.host];
+        }
     self.ending = NO;
     [self refresh];
 }

@@ -14,14 +14,20 @@ static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
     void **slot = DPIvar(toolbar.delegate, "paneToolbarItems");
     // A Swift array of objects is its storage, an NSArray; one bridged from Objective-C is tagged and left alone.
     if (!slot || !*slot || ((uintptr_t)*slot & 0xC000000000000001)) return;
-    NSArray<NSToolbarItem *> *paneItems = (__bridge NSArray *)*slot;
-    NSSet *identifiers = [NSSet setWithArray:[paneItems valueForKey:@"itemIdentifier"]];
+    id raw = (__bridge id)*slot;
+    if (![raw isKindOfClass:NSArray.class]) return;
+    NSMutableSet *identifiers = [NSMutableSet set];
+    for (id item in (NSArray *)raw) {
+        id identifier = DPValueForKey(item, @"itemIdentifier");
+        if ([identifier isKindOfClass:NSString.class]) [identifiers addObject:identifier];
+    }
     for (NSInteger i = toolbar.items.count - 1; i >= 0; i--)
         if ([identifiers containsObject:toolbar.items[i].itemIdentifier]) [toolbar removeItemAtIndex:i];
 }
 
 @interface DPSettings : NSObject
 @property (nonatomic, weak) NSTableView *table;
+@property (nonatomic, weak) NSClipView *watchedClip;
 @property (nonatomic, weak) NSTextField *title;
 @property (nonatomic, copy) NSString *originalTitle, *shownTitle;
 @property (nonatomic, strong) DPPaneView *home, *patches;
@@ -30,7 +36,7 @@ static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
 @property (nonatomic) NSWindowCollectionBehavior behavior;
 @property (nonatomic) NSSize minSize, maxSize;
 @property (nonatomic) CGFloat fixedHeight, dividerHeight;
-@property (nonatomic) BOOL backWasEnabled, backBorrowed, zoomWasEnabled, watchingHeight;
+@property (nonatomic) BOOL backWasEnabled, backBorrowed, zoomWasEnabled;
 @end
 
 static CGFloat const DPDividerMinHeight = 17;
@@ -49,12 +55,17 @@ static __weak DPPaneView *DPShownPane;
     return settings;
 }
 
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
 - (CGFloat)fittedDividerHeight {
     NSTableView *table = self.table;
     NSClipView *clip = table.enclosingScrollView.contentView;
     if (!clip || table.numberOfRows < DPOurRowCount) return DPDividerMinHeight;
-    if (!self.watchingHeight) {
-        self.watchingHeight = YES;
+    if (self.watchedClip != clip) {
+        [NSNotificationCenter.defaultCenter removeObserver:self];
+        self.watchedClip = clip;
         clip.postsFrameChangedNotifications = clip.postsBoundsChangedNotifications = YES;
         for (NSNotificationName name in @[NSViewFrameDidChangeNotification, NSViewBoundsDidChangeNotification])
             [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(fitDivider) name:name object:clip];
@@ -82,7 +93,8 @@ static __weak DPPaneView *DPShownPane;
 }
 
 - (void)preparePane:(DPPaneView *)pane {
-    NSView *detail = ((NSSplitViewController *)self.table.window.contentViewController).splitViewItems.lastObject.viewController.view;
+    NSViewController *controller = self.table.window.contentViewController;
+    NSView *detail = [controller isKindOfClass:NSSplitViewController.class] ? ((NSSplitViewController *)controller).splitViewItems.lastObject.viewController.view : nil;
     if (!detail || pane.superview == detail) return;
     pane.hidden = YES;
     pane.frame = detail.bounds;
@@ -101,7 +113,7 @@ static __weak DPPaneView *DPShownPane;
     self.shown = DPShownPane = pane;
     __weak DPSettings *weakSelf = self;
     pane.titleChanged = ^(NSString *title, BOOL canGoBack) {
-        weakSelf.title.stringValue = weakSelf.shownTitle = title;
+        if (title) weakSelf.title.stringValue = weakSelf.shownTitle = title;
         [weakSelf borrowBack:canGoBack];
     };
     [self allowResizing:YES];
@@ -120,7 +132,7 @@ static __weak DPPaneView *DPShownPane;
             break;
         }
     self.originalTitle = self.title.stringValue;
-    self.title.stringValue = self.shownTitle = pane.title;
+    if (pane.title) self.title.stringValue = self.shownTitle = pane.title;
 }
 
 - (void)hidePane {
@@ -136,13 +148,14 @@ static __weak DPPaneView *DPShownPane;
     NSUInteger index = pane.searchItem ? [toolbar.items indexOfObject:pane.searchItem] : NSNotFound;
     if (index != NSNotFound) {
         [toolbar removeItemAtIndex:index];
-        if (index > 0 && [toolbar.items[index - 1].itemIdentifier isEqualToString:NSToolbarFlexibleSpaceItemIdentifier]) [toolbar removeItemAtIndex:index - 1];
+        if (index > 0 && index - 1 < toolbar.items.count && [toolbar.items[index - 1].itemIdentifier isEqualToString:NSToolbarFlexibleSpaceItemIdentifier])
+            [toolbar removeItemAtIndex:index - 1];
     }
     NSString *shown = self.title.stringValue;
     if (pane.showsPage) [self borrowBack:NO];
     [pane reset];
     self.shown = DPShownPane = nil;
-    if ([shown isEqualToString:self.shownTitle]) self.title.stringValue = self.originalTitle;
+    if (self.originalTitle && [shown isEqualToString:self.shownTitle]) self.title.stringValue = self.originalTitle;
 }
 
 - (void)borrowBack:(BOOL)borrow {

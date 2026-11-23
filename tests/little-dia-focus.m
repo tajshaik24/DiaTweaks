@@ -1,7 +1,13 @@
 #import "Patches/LittleDia/Window.m"
 
 DPPatch DPLittleDia, DPLittleDiaRemember;
-void DPRestoreStack(NSWindow *little, NSDictionary *noted) {}
+static NSMapTable<NSWindow *, NSNumber *> *gRestoreCounts;
+void DPRestoreStack(NSWindow *little, NSDictionary *noted) {
+    if (!little) return;
+    if (!gRestoreCounts) gRestoreCounts = [NSMapTable weakToStrongObjectsMapTable];
+    NSInteger n = [[gRestoreCounts objectForKey:little] integerValue];
+    [gRestoreCounts setObject:@(n + 1) forKey:little];
+}
 NSArray<NSDictionary *> *DPWindowStack(void) { return @[]; }
 void DPReturnToSource(pid_t pid, NSWindow *little, NSArray<NSDictionary *> *stack) {}
 void DPBringBackPutAway(NSWindow *little) {}
@@ -57,8 +63,15 @@ static _TtC5Popup19PlatformPopupWindow *DPClaimedPopup(BOOL key) {
     return window;
 }
 
+// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
 static void DPDrain(NSTimeInterval seconds) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!drained && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    [NSRunLoop.mainRunLoop runUntilDate:until];
 }
 
 static int failures;
@@ -126,6 +139,41 @@ int main(void) {
         [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidBecomeKeyNotification object:w6];
         DPDrain(0.05);
         CHECK(w6.firstResponder == w6, "Little Dia off leaves focus untouched");
+
+        // Regression: 300 ms DPClaim settle timer skips closed, promoted, or disabled Little Dia windows.
+        DPLittleDia.on = YES;
+        _TtC5Popup19PlatformPopupWindow *wClosed = DPClaimedPopup(YES);
+        _TtC5Popup19PlatformPopupWindow *wPromoted = DPClaimedPopup(YES);
+        CHECK([[gRestoreCounts objectForKey:wClosed] integerValue] == 1 && [[gRestoreCounts objectForKey:wPromoted] integerValue] == 1,
+              "initial DPClaim invokes DPRestoreStack once per claimed popup");
+        [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillCloseNotification object:wClosed];
+        DPPromoteLittleDiaWindow(wPromoted);
+        DPDrain(0.35);
+        CHECK([[gRestoreCounts objectForKey:wClosed] integerValue] == 1 && [[gRestoreCounts objectForKey:wPromoted] integerValue] == 1,
+              "300 ms DPClaim timer does not run DPRestoreStack after close or promote");
+
+        _TtC5Popup19PlatformPopupWindow *wPaused = DPClaimedPopup(YES);
+        CHECK([[gRestoreCounts objectForKey:wPaused] integerValue] == 1, "initial DPClaim invokes DPRestoreStack");
+        DPLittleDia.on = NO;
+        DPDrain(0.35);
+        CHECK([[gRestoreCounts objectForKey:wPaused] integerValue] == 1,
+              "300 ms DPClaim timer does not run DPRestoreStack when Little Dia is off/paused");
+
+        // Regression: DPStayingLink NSProxy handles respondsToSelector:/isKindOfClass:/conformsToProtocol: safely with valid and nil targets.
+        DPStayingLink *proxy = [DPStayingLink alloc];
+        proxy.action = @"hello";
+        CHECK([proxy respondsToSelector:@selector(navigationDisposition)], "DPStayingLink responds to navigationDisposition");
+        CHECK([proxy respondsToSelector:@selector(length)], "DPStayingLink forwards respondsToSelector: to target");
+        CHECK(![proxy respondsToSelector:@selector(nonexistentSelectorForProxyTest)], "DPStayingLink returns NO for unknown selectors");
+        CHECK([proxy isKindOfClass:NSString.class], "DPStayingLink forwards isKindOfClass: to target");
+        CHECK([proxy conformsToProtocol:@protocol(NSCopying)], "DPStayingLink forwards conformsToProtocol: to target");
+        CHECK(proxy.navigationDisposition == DPCurrentTab, "DPStayingLink overrides navigationDisposition to DPCurrentTab");
+        DPStayingLink *nilProxy = [DPStayingLink alloc];
+        nilProxy.action = nil;
+        CHECK([nilProxy respondsToSelector:@selector(navigationDisposition)], "nil-target DPStayingLink responds to navigationDisposition");
+        CHECK(![nilProxy respondsToSelector:@selector(length)], "nil-target DPStayingLink does not abort on respondsToSelector:");
+        CHECK(![nilProxy isKindOfClass:NSString.class] && ![nilProxy conformsToProtocol:@protocol(NSCopying)],
+              "nil-target DPStayingLink safely returns NO for kind/protocol checks");
 
         if (failures) return 1;
         puts("PASS: Little Dia focuses the page view without stealing existing focus");

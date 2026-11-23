@@ -18,8 +18,15 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
 - (void)mouseDown:(NSEvent *)event {}  // Swallows the click; the card's mouseDown would close it.
 
 - (void)updateLayer {
-    self.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
-    self.layer.borderColor = NSColor.separatorColor.CGColor;
+    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        self.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
+        self.layer.borderColor = NSColor.separatorColor.CGColor;
+    }];
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    self.layer.borderWidth = 1 / (self.window.backingScaleFactor ?: 2);
 }
 
 - (instancetype)initForPeek:(DPPeekCard *)peek {
@@ -68,7 +75,7 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
     __weak DPPeekFind *weak = self;
     void (^done)(id) = ^(id result) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSInteger total = [[result valueForKey:@"numMatches"] integerValue], at = [[result valueForKey:@"activeMatchOrdinal"] integerValue];
+            NSInteger total = [DPValueForKey(result, @"numMatches") integerValue], at = [DPValueForKey(result, @"activeMatchOrdinal") integerValue];
             weak.count.stringValue = total ? [NSString stringWithFormat:@"%ld/%ld", (long)at, (long)total] : @"0";
         });
     };
@@ -113,7 +120,7 @@ BOOL DPPeekHideFind(DPPeekCard *peek) {
     NSResponder *focus = peek.window.firstResponder;
     BOOL inBar = [focus isKindOfClass:NSView.class] && [(NSView *)focus isDescendantOf:bar];
     [bar removeFromSuperview];
-    if (inBar && !peek.closing) [peek.window makeFirstResponder:peek.host];
+    if (inBar && !peek.closing && !peek.isHiddenOrHasHiddenAncestor) [peek.window makeFirstResponder:peek.host];
     return YES;
 }
 

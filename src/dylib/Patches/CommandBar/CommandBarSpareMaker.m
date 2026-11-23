@@ -17,6 +17,14 @@ void DPDropUnwantedSpares(void) {
         if (DPSpareIn(window) && (!DPSparesOn() || DPHasStrip(window))) DPDropSpare(window);
 }
 
+static NSView *DPVisiblePeekIn(NSWindow *window) {
+    Class card = NSClassFromString(@"DPPeekCard");
+    if (!card) return nil;
+    return DPFindView(window.contentView, ^BOOL(NSView *view) {
+        return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor;
+    });
+}
+
 // Create a hidden spare only when frontmost, idle, and not full screen (switching tabs exits full screen).
 static void DPMakeSpare(void) {
     DPDropUnwantedSpares();
@@ -36,14 +44,14 @@ static void DPMakeSpare(void) {
         if (DPSpareIn(other)) { anySpare = YES; break; }
     if (!DPWanted && !anySpare && CACurrentMediaTime() >= DPSpareUntil) DPWanted = YES;
     if (!DPWanted) return;
-    if (DPSpareIn(window) || DPGet(window, &DPOverlayKey) || DPHidingATab(window) || DPHasStrip(window)) return;
+    if (DPSpareIn(window) || DPGet(window, &DPOverlayKey) || DPHidingATab(window) || DPHasStrip(window) || DPVisiblePeekIn(window)) return;
     id scriptWindow = DPScriptWindow(window);
     if (!scriptWindow) return;
     for (NSWindow *child in window.childWindows) if (child.visible) return;
-    id frontTab = [scriptWindow valueForKey:@"activeTab"];
+    id frontTab = DPValueForKey(scriptWindow, @"activeTab");
     NSString *front = DPTabID(frontTab);
     if (!front || [DPSplits(window) containsObject:front] || [DPBlanks(window) containsObject:front] || DPBlankPage(window)) return;
-    if (![[frontTab valueForKey:@"URL"] description].length) return;
+    if (![DPValueForKey(frontTab, @"URL") description].length) return;
     if (!DPIsKind(window.firstResponder, "RenderWidgetHostViewCocoa")) return;
     NSMenuItem *item = DPMenuItemTitled(NSApp.mainMenu, @"New Tab");
     if (!item.action) return;
@@ -63,7 +71,7 @@ static void DPMakeSpare(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ms * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
             NSView *view = (NSView *)typing, *now = (NSView *)window.firstResponder;
             BOOL typingElsewhere = [now isKindOfClass:NSTextView.class] && !now.isHiddenOrHasHiddenAncestor;
-            if (view.window == window && now != view && !typingElsewhere && !DPGet(window, &DPOverlayKey)) [window makeFirstResponder:view];
+            if (view.window == window && now != view && !typingElsewhere && !DPGet(window, &DPOverlayKey) && !DPVisiblePeekIn(window)) [window makeFirstResponder:view];
         });
 }
 

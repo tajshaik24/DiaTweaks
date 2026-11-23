@@ -52,6 +52,14 @@ NSUInteger DPPatchCount;
 #import "Commands/GroupTabs/Grouping.m"
 #import "Commands/GroupTabs/Menu.m"
 
+@interface DPFakeToolbarDelegate : NSObject <NSToolbarDelegate> {
+@public
+    id paneToolbarItems;
+}
+@end
+@implementation DPFakeToolbarDelegate
+@end
+
 static int failures;
 static void expect(BOOL ok, NSString *what) {
     if (ok) return;
@@ -108,7 +116,19 @@ int main(void) {
 
         // 4. Settings.m borrowBack: preserves original disabled state across repeated borrow calls, and allowResizing: restores zoom button.
         NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 600, 500) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-        window.contentView = scroll;
+        NSViewController *plainVC = [NSViewController new];
+        plainVC.view = scroll;
+        window.contentViewController = plainVC;
+        DPPaneView *testPane = [[DPPaneView alloc] initWithTitle:@"Test" content:[DPHomeView new]];
+        [settings preparePane:testPane];
+        expect(YES, @"preparePane: ignores non-NSSplitViewController contentViewController safely");
+        settings.shown = testPane;
+        settings.originalTitle = nil;
+        settings.shownTitle = @"Test";
+        NSTextField *titleField = [NSTextField labelWithString:@"Test"];
+        settings.title = titleField;
+        [settings closeShownPane];
+        expect([titleField.stringValue isEqualToString:@"Test"], @"closeShownPane does not throw when originalTitle is nil");
         [window standardWindowButton:NSWindowZoomButton].enabled = YES;
         [settings allowResizing:YES];
         expect(![window standardWindowButton:NSWindowZoomButton].enabled, @"allowResizing:YES disables zoom button");
@@ -182,6 +202,38 @@ int main(void) {
         NSMenu *fresh = [[NSMenu alloc] initWithTitle:@"Fresh"];
         [fresh addItemWithTitle:@"New Group with 2 Tabs" action:nil keyEquivalent:@""];
         expect([fresh itemWithTag:DPGroupMenuTag] == nil, @"Menu.m does not mutate fresh context menus while off");
+
+        // 8. Settings.m DPRemoveDiaPaneItems handles non-array/missing KVC keys and DPSettings dealloc removes NSNotificationCenter observers.
+        NSToolbar *testToolbar = [[NSToolbar alloc] initWithIdentifier:@"DPTestToolbar"];
+        DPFakeToolbarDelegate *tbDelegate = [DPFakeToolbarDelegate new];
+        testToolbar.delegate = tbDelegate;
+        tbDelegate->paneToolbarItems = @"not-an-array";
+        DPRemoveDiaPaneItems(testToolbar);
+        tbDelegate->paneToolbarItems = @[ [NSObject new] ];
+        DPRemoveDiaPaneItems(testToolbar);
+        expect(YES, @"DPRemoveDiaPaneItems handles non-array and missing itemIdentifier KVC key safely");
+
+        NSWindow *tempWin = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 300)
+                                                        styleMask:NSWindowStyleMaskTitled
+                                                          backing:NSBackingStoreBuffered defer:NO];
+        __weak DPSettings *weakSettings = nil;
+        NSClipView *tempClip = nil;
+        @autoreleasepool {
+            NSScrollView *tempScroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 200, 300)];
+            DPZeroRowsTable *tempTable = [[DPZeroRowsTable alloc] initWithFrame:NSMakeRect(0, 0, 200, 300)];
+            tempTable.fakeRows = 5;
+            tempScroll.documentView = tempTable;
+            tempWin.contentView = tempScroll;
+            tempClip = tempScroll.contentView;
+            DPSettings *s = [DPSettings forTable:tempTable];
+            weakSettings = s;
+            [s fittedDividerHeight]; // Registers NSNotificationCenter observer on tempClip.
+            DPSet(tempTable, &DPSettingsKey, nil);
+            tempWin.contentView = [NSView new];
+        }
+        expect(weakSettings == nil, @"DPSettings deallocates cleanly");
+        [NSNotificationCenter.defaultCenter postNotificationName:NSViewBoundsDidChangeNotification object:tempClip];
+        expect(YES, @"posting NSViewBoundsDidChangeNotification after DPSettings dealloc does not crash");
     }
     if (!failures) printf("all runtime guard checks passed\n");
     return failures ? 1 : 0;

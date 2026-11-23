@@ -1,6 +1,7 @@
 #import "Patches/Peek/Peek.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 #import "Patches/LittleDia/LittleDia.h"
+#import "Patches/CommandBar/Tabs.h"
 
 static NSURL *DPPeekHovered;
 static __weak id DPPeekHoveredPage, DPPeekHoveredDelegate;
@@ -37,8 +38,15 @@ BOOL DPPeekIsWeb(NSURL *url) {
 static void DPPeekOpenLater(id delegate, id source, NSURL *url) {
     DPPeekLookAheadTurn++;
     NSWindow *window = NSApp.keyWindow;
+    NSString *originTabID = DPActiveTabID(window);
     NSPoint origin = NSEvent.mouseLocation;
-    dispatch_async(dispatch_get_main_queue(), ^{ DPPeekOpen(window, url, origin, delegate, source); });
+    __weak NSWindow *weakWindow = window;
+    __weak id weakDelegate = delegate, weakSource = source;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSWindow *win = weakWindow;
+        id del = weakDelegate, src = weakSource;
+        if (win && src) DPPeekOpen(win, originTabID, url, origin, del, src);
+    });
 }
 
 static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newWebContent, NSURL *url, NSInteger disposition) {
@@ -57,15 +65,18 @@ static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newWebC
 - (NSInteger)navigationDisposition { return DPCurrentTab; }
 - (NSMethodSignature *)methodSignatureForSelector:(SEL)selector { return [self.action methodSignatureForSelector:selector]; }
 - (void)forwardInvocation:(NSInvocation *)invocation { [invocation invokeWithTarget:self.action]; }
+- (BOOL)respondsToSelector:(SEL)selector { return selector == @selector(navigationDisposition) || [self.action respondsToSelector:selector]; }
+- (BOOL)conformsToProtocol:(Protocol *)protocol { return [self.action conformsToProtocol:protocol]; }
+- (BOOL)isKindOfClass:(Class)cls { return [self.action isKindOfClass:cls]; }
 @end
 
 static BOOL DPPeekLeavesPinnedRow(id webContents, id action, NSInteger disposition, NSInteger policy) {
     BOOL stays = disposition == DPCurrentTab || disposition == DPForegroundTab;
-    NSInteger type = [[action valueForKey:@"navigationType"] integerValue];
+    NSInteger type = [DPValueForKey(action, @"navigationType") integerValue];
     // navigationType: 0 = link activation, 4 = other (how Dia reports target=_blank clicks).
     BOOL clicked = type == 0 || (type == 4 && disposition == DPForegroundTab);
     if (DPPeekModifiers() || !stays || !clicked || (policy != DPCurrentTab && policy != DPForegroundTab)) return NO;
-    NSString *from = DPDomainKey([[(NSObject *)webContents valueForKey:@"url"] absoluteString]), *to = DPDomainKey([[action valueForKey:@"url"] absoluteString]);
+    NSString *from = DPDomainKey([DPValueForKey(webContents, @"url") absoluteString]), *to = DPDomainKey([DPValueForKey(action, @"url") absoluteString]);
     if (!from || !to || [DPRegistrableDomain(from) isEqual:DPRegistrableDomain(to)]) return NO;
     return !DPPeekShows(webContents) && DPPeekInPinnedRow(NSApp.keyWindow, webContents);
 }
@@ -73,12 +84,12 @@ static BOOL DPPeekLeavesPinnedRow(id webContents, id action, NSInteger dispositi
 static NSInteger DPWebContent_decidePolicy(id self, SEL _cmd, id webContents, id action) {
     BOOL little = DPLittleDia.on && DPLittleDiaTabLinks.on;
     if (!DPPeek.on && !little) return DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
-    NSInteger disposition = [[action valueForKey:@"navigationDisposition"] integerValue];
+    NSInteger disposition = [DPValueForKey(action, @"navigationDisposition") integerValue];
     if (!DPPeekWanted(disposition)) {
         NSInteger policy = DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
         BOOL peeks = DPPeek.on && DPPeekPinnedLinks.on;
         if (!peeks && !little) return policy;
-        NSURL *url = [action valueForKey:@"url"];
+        NSURL *url = DPValueForKey(action, @"url");
         // Script-opened tabs have no link under the pointer and would lose their opener in Little Dia.
         BOOL clicked = disposition != DPForegroundTab || DPPeekOverLink(webContents, url);
         BOOL leaves = (peeks || (clicked && policy == DPCurrentTab)) && DPPeekLeavesPinnedRow(webContents, action, disposition, policy);
@@ -97,7 +108,7 @@ static NSInteger DPWebContent_decidePolicy(id self, SEL _cmd, id webContents, id
         return DPIgnoreAction;
     }
     if (DPPeekShows(webContents)) return DPCurrentTab;
-    NSURL *url = [action valueForKey:@"url"];
+    NSURL *url = DPValueForKey(action, @"url");
     if (!DPPeekIsWeb(url) || !DPPeekCanOpen(webContents)) return DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
     DPPeekOpenLater(self, webContents, url);
     return DPIgnoreAction;
@@ -138,13 +149,16 @@ void DPPeekOpenDragged(NSURL *url, NSPoint origin) {
     if (!DPPeek.on) return;
     id page = DPPeekHoveredPage;
     if (DPPeekShows(page)) return DPPeekLoad(page, url);
-    if (DPPeekCanOpen(page)) DPPeekOpen(NSApp.keyWindow, url, origin, DPPeekHoveredDelegate, page);
+    NSWindow *window = NSApp.keyWindow;
+    if (DPPeekCanOpen(page)) DPPeekOpen(window, DPActiveTabID(window), url, origin, DPPeekHoveredDelegate, page);
 }
 
 static void DPInstallPeek(void) {
     DPPeekInstallPages();
+    DPPeekInstallSelection();
     DPPeekInstallZoom();
     DPPeekInstallCursor();
+    DPPeekInstallChat();
     DPOnLaunch(^{
         DPHook(DPDiaWebContent, @selector(webContents:didCreateNewWebContent:targetURL:disposition:), (IMP)DPWebContent_didCreate);
         DPHook(DPDiaWebContent, @selector(webContents:decidePolicyForNavigationAction:), (IMP)DPWebContent_decidePolicy);
@@ -171,10 +185,19 @@ static void DPApplyPeek(DPPatch *patch) {
 
 static NSString *DPVerifyPeek(DPPatch *patch) {
     Class delegate = objc_getClass(DPDiaWebContent);
-    if (class_getMethodImplementation(delegate, @selector(webContents:decidePolicyForNavigationAction:)) != (IMP)DPWebContent_decidePolicy)
+    if (!DPIsHooked(delegate, @selector(webContents:decidePolicyForNavigationAction:), (IMP)DPWebContent_decidePolicy))
         return @"link clicks don't reach Peek";
-    if (class_getMethodImplementation(delegate, @selector(webContents:didCreateNewWebContent:targetURL:disposition:)) != (IMP)DPWebContent_didCreate)
+    if (!DPIsHooked(delegate, @selector(webContents:didCreateNewWebContent:targetURL:disposition:), (IMP)DPWebContent_didCreate))
         return @"new windows don't reach Peek";
+    if (!patch->on && DPPeekAllCards(nil).count) return @"Peek cards stayed open when turned off";
+    if (patch->on) {
+        NSCountedSet<NSWindow *> *visibleByWindow = [NSCountedSet set];
+        for (DPPeekCard *peek in DPPeekAllCards(nil)) {
+            if (peek.closing || peek.isHiddenOrHasHiddenAncestor || !peek.window) continue;
+            [visibleByWindow addObject:peek.window];
+            if ([visibleByWindow countForObject:peek.window] > 1) return @"multiple Peek cards are visible in one window";
+        }
+    }
     return DPPeekZoomProblem();
 }
 

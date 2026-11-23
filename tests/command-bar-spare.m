@@ -66,6 +66,13 @@ const uintptr_t DPFirstFill = 4;
 @interface RenderWidgetHostViewCocoa : NSView
 @end
 @implementation RenderWidgetHostViewCocoa
+- (BOOL)acceptsFirstResponder { return YES; }
+@end
+
+@interface DPPeekCard : NSView
+@property(strong) NSView *host;
+@end
+@implementation DPPeekCard
 @end
 
 @interface DPTestWindow : NSWindow
@@ -73,6 +80,10 @@ const uintptr_t DPFirstFill = 4;
 @end
 @implementation DPTestWindow
 - (NSResponder *)firstResponder { return self.fakeResponder ?: super.firstResponder; }
+- (BOOL)makeFirstResponder:(NSResponder *)responder {
+    self.fakeResponder = responder;
+    return [super makeFirstResponder:responder];
+}
 @end
 
 static DPFakeDefaults *gDefaults;
@@ -127,6 +138,7 @@ id DPDismiss(DPCommandBarOverlay *overlay, BOOL closing) {
 void DPInstallFrozenLists(void) {}
 void DPFreezeLists(NSWindow *window) {}
 NSArray<NSString *> *DPListedTabs(NSWindow *window) { return @[]; }
+BOOL DPListsTab(NSView *view, NSString *tabID) { return YES; }
 void DPRelayoutLists(void) {}
 NSString *DPVerifyHiddenRows(void) { return nil; }
 void DPInstallHiddenStripTab(void) {}
@@ -190,6 +202,13 @@ static DPCommandBarOverlay *DPMakeOverlay(NSWindow *window, DPFakeTab *opened, D
 
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
+
+// Spins the main run loop until the condition holds, so a slow runner can't end the wait before an animation or timer lands.
+static void PumpUntil(BOOL (^done)(void)) {
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!done() && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
 
 int main(void) {
     @autoreleasepool {
@@ -287,7 +306,7 @@ int main(void) {
         CHECK(DPParkSpare(DPMakeOverlay(winA, spareA3, pageA)), "parks spareA3");
         swA.activeTab = spareA3;
         CHECK(DPAdoptSpare(winA, pageView), "adopts spareA3");
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.38]];
+        PumpUntil(^BOOL { return spareA3.closed; });
         CHECK(spareA3.closed, "adopt timer closes an unused empty spare in a multi-tab space");
         [profA.appleScriptTabs removeObject:spareA2];
         [profA.appleScriptTabs removeObject:spareA3];
@@ -404,6 +423,81 @@ int main(void) {
         CHECK(DPSpareTimer == nil && !DPHidden.count && !DPParked.count && !DPOwner.count,
               "turning HideTab off stops spare timer and clears hidden/parked tables");
         (void)hidTab;
+
+        // Regression: DPMakeSpare skips background spare creation while a visible Peek card is open,
+        // and DPParkSpare restores focus to Peek's web view rather than the covered background tab.
+        DPCommandBarHideTab.on = YES;
+        DPCommandBarSpare.on = YES;
+        DPCommandBar.on = YES;
+        [profA.appleScriptTabs removeAllObjects];
+        [profA.appleScriptTabs addObject:pageA];
+        swA.activeTab = pageA;
+        DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+        RenderWidgetHostViewCocoa *peekWeb = [[RenderWidgetHostViewCocoa alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+        peekCard.host = peekWeb;
+        [peekCard addSubview:peekWeb];
+        [winA.contentView addSubview:peekCard];
+        winA.fakeResponder = peekWeb;
+        gIdleSeconds = 10;
+        gSendActionCalls = 0;
+        DPWanted = YES;
+        DPSpareUntil = 0;
+        DPMakeSpare();
+        CHECK(gSendActionCalls == 0, "DPMakeSpare does not create a background spare while a visible Peek card is open");
+
+        DPFakeTab *overPeekSpare = DPAddHiddenTab(winA, profA, @"over-peek-spare");
+        DPCommandBarOverlay *overPeekOverlay = DPMakeOverlay(winA, overPeekSpare, pageA);
+        [winA.contentView addSubview:overPeekOverlay];
+        winA.fakeResponder = overPeekOverlay;
+        CHECK(DPParkSpare(overPeekOverlay), "DPParkSpare succeeds over a visible Peek card");
+        CHECK(winA.firstResponder == peekWeb, "DPParkSpare focuses visible Peek web view instead of covered tab");
+        DPDropSpare(winA);
+        [overPeekOverlay removeFromSuperview];
+        peekCard.hidden = YES;
+        winA.fakeResponder = webA;
+        DPWanted = YES;
+        DPSpareUntil = 0;
+        gSendActionCalls = 0;
+        DPMakeSpare();
+        CHECK(gSendActionCalls == 1, "DPMakeSpare resumes once Peek card is parked/hidden");
+        DPStopExpecting();
+        [peekCard removeFromSuperview];
+
+        // Regression: a parked spare belongs to its own space, so another space coming forward drops it
+        // (never touching the new space's tabs) instead of showing it there.
+        DPCommandBarSpare.on = YES;
+        DPCommandBarHideTab.on = YES;
+        peekCard.hidden = NO;
+        [profA.appleScriptTabs removeAllObjects];
+        [profA.appleScriptTabs addObject:pageA];
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];
+        swA.activeTab = pageA;
+        DPFakeTab *otherSpaceTab = DPMakeTab(@"other-space", @"https://example.com");
+        DPFakeProfile *otherSpace = [DPFakeProfile new];
+        otherSpace.appleScriptTabs = [NSMutableArray arrayWithObject:otherSpaceTab];
+        DPFakeTab *leftSpare = DPAddHiddenTab(winA, profA, @"left-space-spare");
+        CHECK(DPParkSpare(DPMakeOverlay(winA, leftSpare, pageA)) && DPSpareIn(winA), "a spare parks in its own space");
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObjects:otherSpace, profA, nil];
+        swA.activeTab = otherSpaceTab;
+        CHECK(!DPShowSpare(winA) && !DPSpareIn(winA), "a spare left in another space isn't shown when the bar opens there");
+        CHECK(leftSpare.closed && !otherSpaceTab.closed && !pageA.closed, "dropping the left spare closes only the spare, not the new space's tabs");
+        CHECK(![gDefaults.store[DPSparesKey] containsObject:@"left-space-spare"], "a dropped spare is no longer noted");
+
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];
+        swA.activeTab = pageA;
+        [profA.appleScriptTabs removeObject:leftSpare];
+        DPFakeTab *idleSpare = DPAddHiddenTab(winA, profA, @"idle-space-spare");
+        CHECK(DPParkSpare(DPMakeOverlay(winA, idleSpare, pageA)) && DPSpareIn(winA), "a second spare parks in its own space");
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObjects:otherSpace, profA, nil];
+        swA.activeTab = otherSpaceTab;
+        winA.fakeResponder = webA;
+        gIdleSeconds = 10;
+        DPMakeSpare();
+        CHECK(!DPSpareIn(winA) || DPSpareIn(winA).openedTab != idleSpare, "the spare timer drops a spare left in another space");
+        CHECK(idleSpare.closed && !otherSpaceTab.closed, "the spare timer closes the left spare without touching the new space");
+        DPStopExpecting();
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];
+        swA.activeTab = pageA;
 
         if (failures) return 1;
         puts("PASS: command bar spare guards, launch cleanup, and timer lifecycle");

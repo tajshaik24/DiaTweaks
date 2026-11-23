@@ -5,14 +5,17 @@ static NSMapTable<NSWindow *, NSMutableArray<NSString *> *> *DPRecent;
 
 id DPTabBefore(NSWindow *window) {
     NSString *active = DPActiveTabID(window);
-    NSArray *tabs = [DPScriptWindow(window) valueForKey:@"appleScriptTabs"];
-    NSArray<NSString *> *ids = [tabs valueForKey:@"tabId"];
+    id rawTabs = DPValueForKey(DPScriptWindow(window), @"appleScriptTabs");
+    NSArray *tabs = [rawTabs isKindOfClass:NSArray.class] ? rawTabs : nil;
+    if (!tabs.count) return nil;
+    NSMutableArray *ids = [NSMutableArray arrayWithCapacity:tabs.count];
+    for (id tab in tabs) [ids addObject:DPTabID(tab) ?: NSNull.null];
     for (NSString *tabID in [DPRecent objectForKey:window].reverseObjectEnumerator) {
         NSUInteger i = [tabID isEqual:active] ? NSNotFound : [ids indexOfObject:tabID];
         if (i != NSNotFound) return tabs[i];
     }
     NSUInteger i = active ? [ids indexOfObject:active] : NSNotFound;
-    if (i == NSNotFound) return nil;
+    if (i == NSNotFound) return tabs.firstObject;
     return i + 1 < tabs.count ? tabs[i + 1] : i > 0 ? tabs[i - 1] : nil;
 }
 

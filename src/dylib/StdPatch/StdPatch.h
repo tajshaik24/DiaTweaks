@@ -77,6 +77,7 @@ typedef struct DPHookFrame {
 
 void DPHook(const char *className, SEL sel, IMP replacement);
 void DPHookClass(Class cls, SEL sel, IMP replacement);
+BOOL DPIsHooked(Class cls, SEL sel, IMP replacement);
 IMP DPDiaIMP(Class cls, SEL sel);
 IMP DPOriginalIMP(id object, SEL sel, IMP replacement);
 IMP DPPushOriginalIMP(id object, SEL sel, IMP replacement, DPHookFrame *frame);
@@ -101,6 +102,14 @@ void DPRelayoutViews(NSHashTable<NSView *> *views);
 BOOL DPMayAdjust(NSView *view);
 void *DPIvar(id object, const char *name);
 id DPSwiftValue(id object, NSString *key);
+static inline id DPValueForKey(id object, NSString *key) {
+    if (!object || !key) return nil;
+    @try { return [object valueForKey:key]; } @catch (NSException *exception) { return nil; }
+}
+static inline BOOL DPSetValueForKey(id object, NSString *key, id value) {
+    if (!object || !key) return NO;
+    @try { [object setValue:value forKey:key]; return YES; } @catch (NSException *exception) { return NO; }
+}
 NSMenu *DPTabContextMenu(NSView *tab);
 NSArray<NSString *> *DPUUIDsIn(NSString *text);
 NSWindowController *DPOpenTabSwitcher(void);
@@ -132,6 +141,7 @@ void DPBeforeExtensionsLoad(void (^block)(void));
 void DPAddLaunchFlag(NSString *flag);
 void DPDropExtension(NSString *folder);
 void DPDropLaunchFlag(NSString *flag);
+void DPDropStaleLaunchFlags(void);
 
 void DPOnLaunch(void (^block)(void));
 void DPOnQuit(void (^block)(void));

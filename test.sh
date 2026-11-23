@@ -35,7 +35,8 @@ run_dia() {
     [ -f "$out" ] || { echo "Dia wrote no report in 15 minutes, or quit before writing one. Is it patched (./install.sh), and was every other Dia closed?" >&2; exit 1; }
 }
 
-cp -f build/DiaPatches.dylib "$support/DiaPatches.dylib"
+# Replace the file rather than overwrite it, so a Dia that has the old one mapped never sees its pages change.
+cp build/DiaPatches.dylib "$support/.DiaPatches.dylib.$$" && mv -f "$support/.DiaPatches.dylib.$$" "$support/DiaPatches.dylib"
 rm -f "$report"
 switch_only=${DIAPATCH_TEST_SWITCH_ONLY:+DIAPATCH_TEST_SWITCH_ONLY=1}
 # with_auto_hide true|false: the saved window state with every window's Auto-Hide Tabs set that way.

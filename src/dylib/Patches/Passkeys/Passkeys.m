@@ -77,6 +77,7 @@ static NSString *DPPasskeysProblem(DPPatch *patch) {
 static BOOL gExtensionLoaded;
 
 static void DPShowHelper(NSNotification *note) {
+    if (!DPPasskeys.on) return;
     NSRunningApplication *helper = [NSRunningApplication runningApplicationWithProcessIdentifier:[note.object intValue]];
     void (^show)(void) = ^{ [helper activateFromApplication:NSRunningApplication.currentApplication options:NSApplicationActivateAllWindows]; };
     if (![note.name hasSuffix:@"signIn"]) return show();
@@ -121,7 +122,7 @@ DP_PATCH(DPPasskeys) {
     .key = @"passkeys",
     .order = 100,
     .title = @"Allow iCloud Passkeys",
-    .detail = @"Sign in to sites with passkeys saved in Apple Passwords. A patched Dia can’t reach them, so the original Dia that DiaTweaks keeps opens behind the Touch ID prompt, then quits. Experimental.",
+    .detail = @"Sign in to sites with passkeys saved in Apple Passwords. A patched Dia can’t reach them, so the original Dia that DiaTweaks keeps opens behind the Touch ID prompt, then quits. A password manager with passkeys of its own, such as Proton Pass, keeps its prompt. Experimental.",
     .symbol = @"person.badge.key.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",

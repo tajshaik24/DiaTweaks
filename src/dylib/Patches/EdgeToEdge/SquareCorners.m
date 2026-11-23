@@ -1,6 +1,6 @@
 #import "EdgeToEdge.h"
 
-static char DPPathKey, DPShadowPathKey, DPPastPathsKey;
+static char DPPathKey, DPShadowPathKey, DPPastPathsKey, DPCornersTouchedKey, DPCornerCurveKey, DPControlCornerKey;
 static NSMapTable<CALayer *, NSView *> *DPPathOwners;
 
 typedef struct CACornerRadii { CGSize topLeft, topRight, bottomRight, bottomLeft; } CACornerRadii;
@@ -9,6 +9,23 @@ typedef struct CACornerRadii { CGSize topLeft, topRight, bottomRight, bottomLeft
 @property CACornerRadii cornerRadii;
 @property(readonly) BOOL _usesCornerRadii;
 @end
+
+// All-zero cornerRadii fall back to cornerRadius, and some releases keep _usesCornerRadii set for them.
+static BOOL DPRadiiEmpty(CACornerRadii radii) {
+    return CGSizeEqualToSize(radii.topLeft, CGSizeZero) && CGSizeEqualToSize(radii.topRight, CGSizeZero)
+        && CGSizeEqualToSize(radii.bottomRight, CGSizeZero) && CGSizeEqualToSize(radii.bottomLeft, CGSizeZero);
+}
+
+static void DPClearCornerRadii(CALayer *layer) {
+    if (![layer respondsToSelector:@selector(setCornerRadii:)] || !layer._usesCornerRadii) return;
+    CACornerRadii zero = {0};
+    layer.cornerRadii = zero;
+    if (!layer._usesCornerRadii || DPRadiiEmpty(layer.cornerRadii)) return;
+    // Zero didn't take, so pin the corners to Dia's radius rather than leave them square.
+    CGFloat r = layer.cornerRadius;
+    CACornerRadii round = { { r, r }, { r, r }, { r, r }, { r, r } };
+    layer.cornerRadii = round;
+}
 
 static void DPMaskCorners(NSView *container, CALayer *layer, CGFloat left, CGFloat right) {
     if ([layer respondsToSelector:@selector(setCornerRadii:)]) {
@@ -48,6 +65,18 @@ static void DPMaskCorners(NSView *container, CALayer *layer, CGFloat left, CGFlo
 
 static CGPathRef DPReshapePath(id owner, char *key, CGPathRef current, NSView *container, CGFloat base, CGFloat grow, CGFloat left, CGFloat right) {
     if (!current || CGRectGetWidth(CGPathGetBoundingBox(current)) < NSWidth(container.bounds) * 0.9) return NULL;
+    if (fabs(grow - 1) < 0.001 && left == 0 && right == 0) {
+        NSArray *saved = DPGet(owner, key);
+        if (!saved) return NULL;
+        CGPathRef dia = (__bridge CGPathRef)saved[0];
+        BOOL match = [saved[1] isEqual:(__bridge id)current];
+        DPSet(owner, key, nil);
+        if (!DPGet(owner, &DPPathKey) && !DPGet(owner, &DPShadowPathKey)) {
+            DPSet(owner, &DPPastPathsKey, nil);
+            [DPPathOwners removeObjectForKey:owner];
+        }
+        return match && !CGPathEqualToPath(dia, current) ? (CGPathRef)CFAutorelease(CGPathCreateCopy(dia)) : NULL;
+    }
     id dia = DPDiaValue(owner, key, (__bridge id)current);
     if (dia == (__bridge id)current) dia = CFBridgingRelease(CGPathCreateCopy(current));
     CGPathRef path = DPReshapeCorners((__bridge CGPathRef)dia, base * 1.6, grow * (1 - right), grow * (1 - left));
@@ -82,8 +111,10 @@ static void DPReshapePaths(NSView *container, CGFloat base, CGFloat grow, CGFloa
 }
 
 BOOL DPCornersRound(CALayer *layer, BOOL right) {
-    if ([layer respondsToSelector:@selector(cornerRadii)] && layer._usesCornerRadii)
-        return (right ? layer.cornerRadii.topRight.width : layer.cornerRadii.topLeft.width) >= 0.5;
+    if ([layer respondsToSelector:@selector(cornerRadii)] && layer._usesCornerRadii) {
+        CACornerRadii radii = layer.cornerRadii;
+        if (!DPRadiiEmpty(radii)) return (right ? radii.topRight.width : radii.topLeft.width) >= 0.5;
+    }
     if (layer.mask) return layer.mask.sublayers[right].cornerRadius > 0;
     return layer.cornerRadius > 0 && (layer.maskedCorners & (right ? DPRightCorners : DPLeftCorners));
 }
@@ -99,9 +130,10 @@ BOOL DPFullScreen(NSView *container) {
 static CALayer *DPCornerShape(NSView *container, CGFloat *base, CGFloat *grow, CGFloat *left, CGFloat *right) {
     CALayer *layer = DPRoundedContent(container).layer;
     if (!layer) return nil;
-    *right = DPFullScreen(container) ? DPEdgeToEdge.progress : 0;
+    CGFloat amount = DPEdgeToEdgeAmount(container);
+    *right = DPFullScreen(container) ? amount : 0;
     BOOL beside = DPBesideSidebar(container);
-    *left = beside ? DPSquareSidebarCorners.progress * DPEdgeToEdge.progress : *right;
+    *left = beside ? DPSquareSidebarCorners.progress * amount : *right;
     CGFloat growth = DPWindowCornerGrowth(container.window);
     if (growth > 0 && layer.cornerRadius > 0 && beside) *left = 1 - (1 - *left) * (layer.cornerRadius - growth) / layer.cornerRadius;
     *base = DPBaseCornerRadius(container) ?: layer.cornerRadius;
@@ -109,7 +141,59 @@ static CALayer *DPCornerShape(NSView *container, CGFloat *base, CGFloat *grow, C
     return layer;
 }
 
+static void DPRestorePath(id owner, char *key, NSString *prop) {
+    if (!owner) return;
+    NSArray *saved = DPGet(owner, key);
+    if (!saved) return;
+    CGPathRef dia = (__bridge CGPathRef)saved[0];
+    id current = [owner valueForKey:prop];
+    BOOL match = [saved[1] isEqual:current];
+    DPSet(owner, key, nil);
+    DPSet(owner, &DPPastPathsKey, nil);
+    [DPPathOwners removeObjectForKey:owner];
+    if (match && dia && (!current || !CGPathEqualToPath(dia, (__bridge CGPathRef)current))) DPSetPath(owner, prop, dia);
+}
+
+static void DPRestoreCornerCurve(CALayer *layer) {
+    CALayerCornerCurve saved = DPGet(layer, &DPCornerCurveKey);
+    if (!saved) return;
+    DPSet(layer, &DPCornerCurveKey, nil);
+    if (layer.cornerCurve != saved) layer.cornerCurve = saved;
+}
+
+static void DPRestoreSquareCorners(NSView *container, CALayer *layer) {
+    DPSet(container, &DPCornersTouchedKey, nil);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    DPRestoreCornerCurve(layer);
+    CALayer *card = DPChatCard(container).layer;
+    if (card) DPRestoreCornerCurve(card);
+    DPClearCornerRadii(layer);
+    if (layer.mask) layer.mask = nil;
+    if (layer.maskedCorners != (DPLeftCorners | DPRightCorners)) layer.maskedCorners = DPLeftCorners | DPRightCorners;
+    for (NSView *sub in container.subviews)
+        for (CALayer *sublayer in sub.layer.sublayers) {
+            CAShapeLayer *shape = [sublayer isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)sublayer
+                                : [sublayer.mask isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)sublayer.mask : nil;
+            DPRestorePath(shape, &DPPathKey, @"path");
+            DPRestorePath(sublayer, &DPShadowPathKey, @"shadowPath");
+        }
+    NSView *content = DPRoundedContent(container);
+    NSView *bar = DPFindView(content, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaToolbar); });
+    if (bar && [content.layer respondsToSelector:@selector(setCornerRadii:)]) {
+        DPFindView(bar, ^BOOL(NSView *view) {
+            CALayer *ctrl = view.layer;
+            if (!DPGet(ctrl, &DPControlCornerKey)) return NO;
+            DPSet(ctrl, &DPControlCornerKey, nil);
+            DPClearCornerRadii(ctrl);
+            return NO;
+        });
+    }
+    [CATransaction commit];
+}
+
 void DPRoundCornerControls(NSView *container) {
+    if (!DPEdgeToEdge.on && DPEdgeToEdge.progress <= 0 && !DPWindowCorners.on) return;
     NSView *content = DPRoundedContent(container);
     NSView *bar = DPFindView(content, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaToolbar); });
     if (!bar || ![content.layer respondsToSelector:@selector(cornerRadii)]) return;
@@ -126,6 +210,7 @@ void DPRoundCornerControls(NSView *container) {
         if (topLeft == dia && topRight == dia && !layer._usesCornerRadii) return NO;
         CGSize l = CGSizeMake(topLeft, topLeft), r = CGSizeMake(topRight, topRight), d = CGSizeMake(dia, dia);
         CACornerRadii radii = layer.contentsAreFlipped ? (CACornerRadii){ d, d, r, l } : (CACornerRadii){ l, r, d, d };
+        DPSet(layer, &DPControlCornerKey, @YES);
         DPAnimateLayer(container, layer, @"cornerRadii", [NSValue valueWithBytes:&radii objCType:@encode(CACornerRadii)]);
         return NO;
     });
@@ -135,9 +220,23 @@ void DPApplySquareCorners(NSView *container) {
     CGFloat base, grow, left, right;
     CALayer *layer = DPCornerShape(container, &base, &grow, &left, &right);
     if (!layer) return;
-    layer.cornerCurve = kCACornerCurveContinuous;
+    BOOL active = DPEdgeToEdge.on || DPEdgeToEdge.progress > 0 || DPWindowCorners.on;
+    if (!active) {
+        if (DPGet(container, &DPCornersTouchedKey)) DPRestoreSquareCorners(container, layer);
+        return;
+    }
+    DPSet(container, &DPCornersTouchedKey, @YES);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    if (layer.cornerCurve != kCACornerCurveContinuous) {
+        if (!DPGet(layer, &DPCornerCurveKey)) DPSet(layer, &DPCornerCurveKey, layer.cornerCurve ?: kCACornerCurveCircular);
+        layer.cornerCurve = kCACornerCurveContinuous;
+    }
+    CALayer *card = DPChatCard(container).layer;
+    if (card && card.cornerCurve != kCACornerCurveContinuous) {
+        if (!DPGet(card, &DPCornerCurveKey)) DPSet(card, &DPCornerCurveKey, card.cornerCurve ?: kCACornerCurveCircular);
+        card.cornerCurve = kCACornerCurveContinuous;
+    }
     DPMaskCorners(container, layer, left, right);
     DPReshapePaths(container, base, grow, left, right);
     [CATransaction commit];
@@ -175,7 +274,7 @@ static NSString *DPVerifySquareCorners(DPPatch *patch) {
         CALayer *layer = DPRoundedContent(container).layer;
         if (!layer) return @"no rounded web content found";
         if (!DPBesideSidebar(container)) continue;
-        BOOL square = patch->on && DPEdgeToEdge.on;
+        BOOL square = patch->on && DPEdgeToEdgeAmount(container) > 0.5;
         if (DPCornersRound(layer, NO) == square) return square ? @"corners by the sidebar are round" : @"corners by the sidebar are square";
     }
     return nil;

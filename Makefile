@@ -54,10 +54,10 @@ build/vertical-tab-glow: tests/vertical-tab-glow.m $(wildcard src/dylib/Patches/
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ $<
 
 build/peek-cursor: tests/peek-cursor.m src/dylib/Patches/Peek/Cursor.m src/dylib/Patches/Peek/Peek.h src/dylib/StdPatch/Hook.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ $<
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ $<
 
 build/peek-link: tests/peek-link.m src/dylib/Patches/Peek/Link.m src/dylib/Patches/Peek/Peek.h $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/peek-link.m src/dylib/Patches/Peek/Link.m
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/peek-link.m src/dylib/Patches/Peek/Link.m
 
 build/safe-mode: tests/safe-mode.m src/dylib/SafeMode/SafeMode.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ $<
@@ -70,6 +70,9 @@ build/hook-table: tests/hook-table.m src/dylib/StdPatch/Hook.m $(wildcard src/dy
 
 build/updates-runtime: tests/updates-runtime.m src/dylib/Updates/Updates.m src/dylib/Updates/Updates.h src/dylib/Settings/Controls.m src/dylib/Settings/SoftwareUpdate.m src/dylib/Settings/Settings.h src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/updates-runtime.m src/dylib/StdPatch/Views.m
+
+build/settings-preview: tests/settings-preview.m src/dylib/Settings/Preview.m src/dylib/Settings/Controls.m src/dylib/Settings/Settings.h $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo -o $@ tests/settings-preview.m
 
 build/runtime-guards: tests/runtime-guards.m src/dylib/StdPatch/TypedURL.m src/dylib/StdPatch/Hide.m src/dylib/StdPatch/HideHosts.m src/dylib/StdPatch/Hide.h src/dylib/Settings/Settings.m src/dylib/Settings/Settings.h src/dylib/Commands/GroupTabs/Order.m src/dylib/Commands/GroupTabs/Grouping.m src/dylib/Commands/GroupTabs/Menu.m src/dylib/Commands/GroupTabs/GroupTabs.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m $(GROUP_TABS) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/runtime-guards.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m $(GROUP_TABS)
@@ -102,8 +105,17 @@ build/little-dia-route: tests/little-dia-route.m src/dylib/Patches/LittleDia/Rou
 build/chat-card: tests/chat-card.m src/dylib/Patches/EdgeToEdge/ChatCard.m src/dylib/Patches/EdgeToEdge/EdgeToEdge.h src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/chat-card.m src/dylib/StdPatch/Views.m
 
+build/edge-to-edge-fullscreen: tests/edge-to-edge-fullscreen.m $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/edge-to-edge-fullscreen.m $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+check-edge-to-edge-fullscreen: build/edge-to-edge-fullscreen
+	build/edge-to-edge-fullscreen
+
+check: check-edge-to-edge-fullscreen
+.PHONY: check-edge-to-edge-fullscreen
+
 build/little-dia-focus: tests/little-dia-focus.m src/dylib/Patches/LittleDia/Window.m src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Commands/GroupTabs/Messages.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/little-dia-focus.m src/dylib/Commands/GroupTabs/Messages.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/little-dia-focus.m src/dylib/Commands/GroupTabs/Messages.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
 HIDE_TOOLBAR_DIR := src/dylib/Patches/HideToolbar
 HIDE_TOOLBAR_LAYOUT := $(addprefix $(HIDE_TOOLBAR_DIR)/,HideToolbar.m Layout.m Hover.m Permission.m)
@@ -117,22 +129,51 @@ build/hide-toolbar-settle: tests/hide-toolbar-settle.m src/dylib/Test/Test.m $(S
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/hide-toolbar-settle.m $(SETTLE)
 
 build/show-address-field: tests/show-address-field.m src/dylib/Patches/ShowAddressField/ShowAddressField.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/show-address-field.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/show-address-field.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
 build/hide-chat-button: tests/hide-chat-button.m src/dylib/Patches/HideChatButton/HideChatButton.m src/dylib/Patches/TurnOffAI/TurnOffAI.m src/dylib/Patches/TurnOffAI/TurnOffAI.h src/dylib/StdPatch/Hide.m src/dylib/StdPatch/HideHosts.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/hide-chat-button.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-build/launch-flags: tests/launch-flags.m src/dylib/StdPatch/Extensions.m src/dylib/StdPatch/Hook.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/launch-flags.m src/dylib/StdPatch/Hook.m
+CHAT_MODEL := src/dylib/Patches/DiaChatModel
+AGENT_TRANSPORT := $(addprefix src/dylib/Patches/AgentTransport/,AgentRelay.m AgentSocket.m AgentFilters.m AgentFrames.m AgentWriter.m)
 
-build/command-bar-swap: tests/command-bar-swap.m src/dylib/Patches/CommandBar/CommandBarSwap.m src/dylib/Patches/CommandBar/HideTabButton.m src/dylib/Patches/CommandBar/CommandBarOverlay.h src/dylib/Patches/CommandBar/HideTab.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/command-bar-swap.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+build/dia-chat-model: tests/dia-chat-model.m $(CHAT_MODEL)/DiaChatModel.m $(CHAT_MODEL)/Fallback.m $(CHAT_MODEL)/AgentRequest.m $(AGENT_TRANSPORT) src/dylib/StdPatch/Hook.m $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/AgentTransport/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/dia-chat-model.m $(CHAT_MODEL)/DiaChatModel.m $(CHAT_MODEL)/Fallback.m $(CHAT_MODEL)/AgentRequest.m $(AGENT_TRANSPORT) src/dylib/StdPatch/Hook.m
+
+check-dia-chat-model: build/dia-chat-model
+	build/dia-chat-model
+
+check: check-dia-chat-model
+.PHONY: check-dia-chat-model
+
+check-agent-transport:
+	tests/agent-transport
+
+check: check-agent-transport
+.PHONY: check-agent-transport
+
+check-chat-models:
+	tests/chat-models
+
+check: check-chat-models
+.PHONY: check-chat-models
+
+build/hide-connect-app-prompt: tests/hide-connect-app-prompt.m src/dylib/Patches/HideConnectAppPrompts/HideConnectAppPrompts.m src/dylib/Patches/HideConnectAppPrompts/HideConnectAppPrompts.h src/dylib/Patches/TurnOffAI/TurnOffAI.m src/dylib/Patches/TurnOffAI/TurnOffAI.h src/dylib/StdPatch/Hide.m src/dylib/StdPatch/HideHosts.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/hide-connect-app-prompt.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+LAUNCH_FLAGS := src/dylib/Patches/LaunchFlags/Parse.m src/dylib/Patches/LaunchFlags/LaunchFlags.m src/dylib/Patches/LaunchFlags/Rows.m
+
+build/launch-flags: tests/launch-flags.m src/dylib/StdPatch/Extensions.m $(LAUNCH_FLAGS) src/dylib/Patches/LaunchFlags/LaunchFlags.h src/dylib/Settings/Controls.m src/dylib/Settings/Settings.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/launch-flags.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+build/command-bar-swap: tests/command-bar-swap.m src/dylib/Patches/CommandBar/CommandBarSwap.m src/dylib/Patches/CommandBar/HideTabButton.m src/dylib/Patches/CommandBar/HideTabRows.m src/dylib/Patches/CommandBar/CommandBarOverlay.h src/dylib/Patches/CommandBar/HideTab.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/command-bar-swap.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
 build/command-bar-spare: tests/command-bar-spare.m src/dylib/Patches/CommandBar/CommandBarSpare.m src/dylib/Patches/CommandBar/CommandBarSpareMaker.m src/dylib/Patches/CommandBar/HideTab.m src/dylib/Patches/CommandBar/HideTabButton.m src/dylib/Patches/CommandBar/Tabs.m src/dylib/Patches/CommandBar/CommandBarOverlay.h src/dylib/Patches/CommandBar/HideTab.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/command-bar-spare.m src/dylib/Patches/CommandBar/Tabs.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/command-bar-spare.m src/dylib/Patches/CommandBar/Tabs.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-build/command-bar-lifecycle: tests/command-bar-lifecycle.m src/dylib/Patches/CommandBar/CommandBar.m src/dylib/Patches/CommandBar/CommandBarOverlay.h src/dylib/Patches/CommandBar/HideTab.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/Patches/CommandBar/AutoPip.h src/dylib/Patches/CompactCommandBar/CompactCommandBar.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/command-bar-lifecycle.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+build/command-bar-lifecycle: tests/command-bar-lifecycle.m src/dylib/Patches/CommandBar/CommandBar.m src/dylib/Patches/CommandBar/Tabs.m src/dylib/Patches/CommandBar/CommandBarOverlay.h src/dylib/Patches/CommandBar/HideTab.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/Patches/CommandBar/AutoPip.h src/dylib/Patches/CompactCommandBar/CompactCommandBar.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/command-bar-lifecycle.m src/dylib/Patches/CommandBar/Tabs.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
 build/tab-titles: tests/tab-titles.m src/dylib/Patches/TabTitles/Title.m src/dylib/Patches/TabTitles/Title.h | build
 	clang $(CFLAGS) -Isrc/dylib -framework Foundation -o $@ tests/tab-titles.m src/dylib/Patches/TabTitles/Title.m
@@ -142,25 +183,45 @@ DIAPATCH_PARTS := $(filter-out src/diapatch/main.m,$(wildcard src/diapatch/*.m))
 build/diapatch-tests: tests/diapatch.m $(wildcard src/diapatch/*.[hm]) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/diapatch -framework AppKit -framework CoreGraphics -framework Security -o $@ tests/diapatch.m $(DIAPATCH_PARTS)
 
-build/open-sidebar-instantly: tests/open-sidebar-instantly.m src/dylib/Patches/OpenSidebarInstantly/OpenSidebarInstantly.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/open-sidebar-instantly.m
+build/ai-history-search: tests/ai-history-search.m src/dylib/Patches/AIHistorySearch/AIHistorySearch.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/ai-history-search.m
 
-build/native-messaging: tests/native-messaging.m src/dylib/StdPatch/Hosts.m src/dylib/Patches/Passkeys/Passkeys.m src/dylib/Patches/ICloudPasswords/ICloudPasswords.m src/dylib/Patches/Bitwarden/Bitwarden.m src/dylib/Patches/OnePassword/OnePassword.m src/diapatch/PasswordsHost.m $(wildcard src/dylib/StdPatch/*.h src/diapatch/Passwords*.h $(PASSKEYS)/*) | build
+build/open-sidebar-instantly: tests/open-sidebar-instantly.m src/dylib/Patches/OpenSidebarInstantly/OpenSidebarInstantly.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/open-sidebar-instantly.m
+
+build/native-messaging: tests/native-messaging.m src/dylib/StdPatch/Hosts.m src/dylib/Patches/Passkeys/Passkeys.m src/dylib/Patches/ICloudPasswords/ICloudPasswords.m src/dylib/Patches/Bitwarden/Bitwarden.m src/dylib/Patches/ProtonPass/ProtonPass.m src/dylib/Patches/OnePassword/OnePassword.m src/diapatch/PasswordsHost.m $(wildcard src/dylib/StdPatch/*.h src/diapatch/Passwords*.h $(PASSKEYS)/*) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -D_mh_dylib_header=_mh_execute_header -Isrc/dylib -Isrc/diapatch $(EXTENSION) -framework AppKit -o $@ \
 		tests/native-messaging.m src/dylib/StdPatch/Hosts.m src/dylib/Patches/Passkeys/Passkeys.m src/dylib/Patches/OnePassword/OnePassword.m
 
-build/diapatch-passkeys: tests/diapatch-passkeys.m src/diapatch/PasswordsLaunch.m src/diapatch/Passkeys.m $(wildcard src/diapatch/*.h) | build
-	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/diapatch -framework Foundation -framework CoreGraphics -o $@ tests/diapatch-passkeys.m
+build/diapatch-passkeys: tests/diapatch-passkeys.m src/diapatch/PasswordsLaunch.m src/diapatch/PasswordsHandoff.m src/diapatch/Passkeys.m $(wildcard src/diapatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/diapatch -framework Foundation -framework CoreGraphics -framework Security -o $@ tests/diapatch-passkeys.m
 
 build/passkeys-origin: tests/passkeys-origin.m src/diapatch/Passkeys.m src/diapatch/Passkeys.h src/diapatch/LaunchServices.h | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc -framework Foundation -framework CoreGraphics -o $@ tests/passkeys-origin.m
 
+build/passkeys-managers: tests/passkeys-managers.m tests/passkeys-managers.js $(PASSKEYS)/page.js | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -framework Foundation -framework JavaScriptCore -o $@ tests/passkeys-managers.m
+
+check-passkeys-managers: build/passkeys-managers
+	build/passkeys-managers
+
+check: check-passkeys-managers
+.PHONY: check-passkeys-managers
+
 build/app-icon-signing: tests/app-icon-signing.m src/diapatch/AppIcon.m src/diapatch/IconCatalog.m src/diapatch/AppIcon.h src/diapatch/IconCatalog.h | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc -framework Foundation -framework CoreGraphics -framework Security -o $@ tests/app-icon-signing.m src/diapatch/AppIcon.m src/diapatch/IconCatalog.m
 
-PEEK_LIFE := $(addprefix src/dylib/Patches/Peek/,Peek.h Glow.m Tab.m Motion.m Card.m Pages.m Zoom.m DragLinks.m)
+PEEK_LIFE := $(addprefix src/dylib/Patches/Peek/,Peek.h Glow.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m DragLinks.m)
 build/peek-lifecycle: tests/peek-lifecycle.m $(PEEK_LIFE) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-lifecycle.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-lifecycle.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+PEEK_TABS := $(addprefix src/dylib/Patches/Peek/,Peek.h Controls.m Address.m Find.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m)
+build/peek-tabs: tests/peek-tabs.m $(PEEK_TABS) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-tabs.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+PEEK_CHAT := $(addprefix src/dylib/Patches/Peek/,Peek.h Chat.m ChatContext.m Keys.m Visibility.m Selection.m Card.m Pages.m Handoff.m Motion.m Tab.m)
+build/peek-chat: tests/peek-chat.m $(PEEK_CHAT) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-chat.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
 HIDE_TOOLBAR_OFF := $(addprefix $(HIDE_TOOLBAR_DIR)/,HideToolbar.h HideToolbar.m Layout.m Hover.m Permission.m PlainTab.m ProgressLine.m ProgressColors.m LoadingProgress.m)
 build/hide-toolbar-off: tests/hide-toolbar-off.m $(HIDE_TOOLBAR_OFF) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
@@ -168,9 +229,21 @@ build/hide-toolbar-off: tests/hide-toolbar-off.m $(HIDE_TOOLBAR_OFF) src/dylib/S
 
 WINDOW_PATCHES := src/dylib/Patches/WindowCorners/WindowCorners.m src/dylib/Patches/WindowMaterial/WindowMaterial.m src/dylib/Patches/PrivateWindowTheme/PrivateWindowTheme.m src/dylib/Patches/HideTrafficLights/HideTrafficLights.m src/dylib/Patches/CompactCommandBar/CompactCommandBar.m src/dylib/Patches/CompactCommandBar/Layout.m src/dylib/Patches/CompactCommandBar/NewTab.m src/dylib/Patches/CommandBar/HideTabParked.m src/dylib/Patches/CommandBar/HideTabLayout.m
 build/window-patches: tests/window-patches.m $(WINDOW_PATCHES) src/dylib/Patches/DragWindowFromPage/DragWindowFromPage.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/CompactCommandBar/*.h src/dylib/Patches/CommandBar/HideTab.h src/dylib/Patches/EdgeToEdge/EdgeToEdge.h) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/window-patches.m $(WINDOW_PATCHES) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/window-patches.m $(WINDOW_PATCHES) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+build/zoom-on-double-click: tests/zoom-on-double-click.m src/dylib/Patches/ZoomOnDoubleClick/ZoomOnDoubleClick.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/zoom-on-double-click.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+check-zoom-on-double-click: build/zoom-on-double-click
+	build/zoom-on-double-click
+
+check: check-zoom-on-double-click
+.PHONY: check-zoom-on-double-click
 
 build/pinned-tab-close-button: tests/pinned-tab-close-button.m src/dylib/Patches/PinnedTabCloseButton/PinnedTabCloseButton.m src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ $<
+
+build/pinned-split-close: tests/pinned-split-close.m src/dylib/Patches/PinnedSplitClose/PinnedSplitClose.m src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ $<
 
 SIDEBAR_TAB_BUGS := src/dylib/Patches/HideSleepingTabs/HideSleepingTabs.m src/dylib/Patches/HideTabGroupBackground/HideTabGroupBackground.m \
@@ -182,7 +255,8 @@ SIDEBAR_TAB_BUGS := src/dylib/Patches/HideSleepingTabs/HideSleepingTabs.m src/dy
 	src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.m src/dylib/Patches/CompactSidebarHeader/CompactSidebarHeader.m \
 	src/dylib/Patches/TidyTabs/TidyTabs.m src/dylib/Patches/TidyTabs/Layout.m src/dylib/Patches/TidyTabs/Hover.m \
 	src/dylib/Patches/TidyTabs/Row.m src/dylib/Patches/TidyTabs/Separator.m src/dylib/Patches/TidyTabs/Brush.m src/dylib/Patches/TidyTabs/Wave.m \
-	src/dylib/Patches/CommandBar/Tabs.m src/dylib/Commands/GroupTabs/Messages.m \
+	src/dylib/Patches/CommandBar/Tabs.m src/dylib/Patches/CommandBar/HideTab.m src/dylib/Patches/CommandBar/HideTabRows.m \
+	src/dylib/Patches/CommandBar/HideTabLayout.m src/dylib/Patches/CommandBar/HideTabParked.m src/dylib/Commands/GroupTabs/Messages.m \
 	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
 build/sidebar-tab-bugs: tests/sidebar-tab-bugs.m $(SIDEBAR_TAB_BUGS) $(wildcard src/dylib/StdPatch/*.h) | build
@@ -192,10 +266,89 @@ UNLOAD_TAB := src/dylib/Patches/UnloadTab/UnloadTab.m src/dylib/Patches/UnloadTa
 	src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.m src/dylib/Patches/CommandBar/Tabs.m \
 	src/dylib/Commands/GroupTabs/Messages.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-build/unload-tab: tests/unload-tab.m $(UNLOAD_TAB) $(wildcard src/dylib/Patches/UnloadTab/*.h src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/Commands/GroupTabs/GroupTabs.h src/dylib/StdPatch/*.h) | build
+build/unload-tab: tests/unload-tab.m tests/watchdog.h $(UNLOAD_TAB) $(wildcard src/dylib/Patches/UnloadTab/*.h src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/Commands/GroupTabs/GroupTabs.h src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/unload-tab.m $(UNLOAD_TAB)
 
-check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/safe-mode build/pause build/hook-table build/updates-runtime build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/open-sidebar-instantly build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/sidebar-tab-bugs build/unload-tab build/patches.json
+PROFILE_COLOR_PICKER := $(wildcard src/dylib/Patches/ProfileColorPicker/*.m) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+build/profile-color-picker: tests/profile-color-picker.m $(PROFILE_COLOR_PICKER) src/dylib/Patches/ProfileColorPicker/ProfileColorPicker.h $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/profile-color-picker.m $(PROFILE_COLOR_PICKER)
+
+HISTORICAL_REGRESSIONS := src/dylib/Patches/CompactTabRows/CompactTabRows.m src/dylib/Patches/CollapsePinned/CollapsePinned.m \
+	src/dylib/Patches/PullRequestRepo/PullRequestRepo.m src/dylib/Patches/PullRequestRepo/Subtitle.m src/dylib/Patches/PullRequestRepo/Rows.m \
+	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+build/historical-regressions: tests/historical-regressions.m tests/watchdog.h src/dylib/Patches/Peek/Toolbar.m src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Stack.m $(HISTORICAL_REGRESSIONS) $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/Peek.h src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Patches/HideToolbar/HideToolbar.h src/dylib/Patches/CompactTabRows/CompactTabRows.h src/dylib/Patches/PullRequestRepo/PullRequestRepo.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/historical-regressions.m $(HISTORICAL_REGRESSIONS)
+
+build/abi-kvc-kvo-swift.o: src/dylib/Commands/GroupTabs/Selection.swift tests/abi-kvc-kvo-swift.swift | build
+	swiftc $(SWIFTFLAGS) -emit-object -o $@ $^
+
+ABI_KVC_KVO := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/Patches/CommandBar/Tabs.m \
+	src/dylib/Patches/LittleDia/Profile.m src/dylib/Patches/SkipAccount/Code.m \
+	src/dylib/Patches/Peek/Address.m src/dylib/Patches/Peek/CopyURL.m src/dylib/Patches/Peek/Toolbar.m \
+	src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/Peek/ChatContext.m src/dylib/Patches/Peek/Peek.m \
+	src/dylib/Settings/Preview.m
+
+build/abi-kvc-kvo: tests/abi-kvc-kvo.m tests/watchdog.h build/abi-kvc-kvo-swift.o $(ABI_KVC_KVO) src/dylib/Patches/ExtensionsShortcut/ExtensionsShortcut.m src/dylib/Patches/HideHistorySuggestions/HideHistorySuggestions.m $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/*.h src/dylib/Patches/LittleDia/*.h src/dylib/Patches/CommandBar/*.h src/dylib/Patches/SkipAccount/*.h src/dylib/Settings/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
+		-L$(SWIFT_LIB) -Wl,-rpath,/usr/lib/swift -o $@ tests/abi-kvc-kvo.m $(ABI_KVC_KVO) build/abi-kvc-kvo-swift.o
+
+VIEW_REUSE_LAYOUT := $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/Patches/WindowCorners/WindowCorners.m \
+	src/dylib/Patches/WindowMaterial/WindowMaterial.m src/dylib/Patches/PullRequestRepo/PullRequestRepo.m \
+	src/dylib/Patches/PullRequestRepo/Subtitle.m src/dylib/Patches/PullRequestRepo/Rows.m \
+	src/dylib/Patches/CompactTabRows/CompactTabRows.m src/dylib/Patches/CollapsePinned/CollapsePinned.m \
+	src/dylib/Patches/HideTabGroupBackground/HideTabGroupBackground.m src/dylib/Patches/ProfileEmoji/ProfileEmoji.m \
+	src/dylib/Patches/TidyTabs/TidyTabs.m src/dylib/Patches/TidyTabs/Layout.m src/dylib/Patches/TidyTabs/Hover.m \
+	src/dylib/Patches/TidyTabs/Row.m src/dylib/Patches/TidyTabs/Separator.m src/dylib/Patches/TidyTabs/Brush.m \
+	src/dylib/Patches/TidyTabs/Wave.m src/dylib/Patches/SidebarGrain/SidebarGrain.m \
+	src/dylib/Patches/CompactCommandBar/CompactCommandBar.m src/dylib/Patches/CompactCommandBar/Layout.m \
+	src/dylib/Patches/CompactCommandBar/NewTab.m src/dylib/Patches/LittleDia/Window.m \
+	src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Bar.m src/dylib/Patches/LittleDia/Address.m \
+	src/dylib/Patches/TurnOffAI/TurnOffAI.m src/dylib/Patches/TurnOffAI/Rows.m \
+	src/dylib/Patches/HideToolbar/PlainTab.m src/dylib/Patches/HideToolbar/ProgressLine.m \
+	$(wildcard src/dylib/Patches/HideVerticalTabGlow/*.m) \
+	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+build/view-reuse-layout: tests/view-reuse-layout.m tests/watchdog.h $(VIEW_REUSE_LAYOUT) $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework Metal -o $@ tests/view-reuse-layout.m $(VIEW_REUSE_LAYOUT)
+
+COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m \
+	src/dylib/StdPatch/Hide.m src/dylib/StdPatch/HideHosts.m src/dylib/StdPatch/Patch.m \
+	src/dylib/StdPatch/Shortcut.m src/dylib/StdPatch/Extensions.m src/dylib/StdPatch/Zoom.m \
+	src/dylib/Settings/Controls.m src/dylib/Settings/Items.m src/dylib/Settings/Overview.m \
+	src/dylib/Settings/Home.m src/dylib/Settings/Page.m \
+	src/dylib/Commands/GroupTabs/Messages.m src/dylib/Commands/GroupTabs/Tracking.m src/dylib/Commands/GroupTabs/Menu.m \
+	$(HIDE_TOOLBAR) src/dylib/Patches/ShowAddressField/ShowAddressField.m \
+	src/dylib/Patches/HideChatButton/HideChatButton.m src/dylib/Patches/HideChatsButton/HideChatsButton.m \
+	src/dylib/Patches/HideUpgradeBanner/HideUpgradeBanner.m src/dylib/Patches/HidePersonalizeButton/HidePersonalizeButton.m \
+	src/dylib/Patches/HideSkillsSuggestions/HideSkillsSuggestions.m src/dylib/Patches/HideConnectAppPrompts/HideConnectAppPrompts.m \
+	src/dylib/Patches/TurnOffAI/TurnOffAI.m src/dylib/Patches/TurnOffAI/Rows.m \
+	src/dylib/Patches/HideTrafficLights/HideTrafficLights.m src/dylib/Patches/CompactSidebarHeader/CompactSidebarHeader.m \
+	src/dylib/Patches/WindowCorners/WindowCorners.m \
+	$(wildcard src/dylib/Patches/EdgeToEdge/*.m) \
+	$(wildcard src/dylib/Patches/ProfileColorPicker/*.m) \
+	src/dylib/Patches/PrivateWindowTheme/PrivateWindowTheme.m \
+	src/dylib/Patches/WindowMaterial/WindowMaterial.m src/dylib/Patches/TranslucentSidebar/TranslucentSidebar.m \
+	src/dylib/Patches/HidePinnedTabBorder/HidePinnedTabBorder.m src/dylib/Patches/HideTabGroupBackground/HideTabGroupBackground.m \
+	src/dylib/Patches/UnloadTab/UnloadTab.m src/dylib/Patches/UnloadTab/Pages.m src/dylib/Patches/UnloadTab/Recent.m \
+	src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.m \
+	src/dylib/Patches/CollapsePinned/CollapsePinned.m src/dylib/Patches/CompactTabRows/CompactTabRows.m \
+	src/dylib/Patches/CommandBar/CommandBar.m src/dylib/Patches/CommandBar/AutoPip.m \
+	src/dylib/Patches/CommandBar/HideTabLayout.m src/dylib/Patches/CommandBar/Tabs.m \
+	src/dylib/Patches/LittleDia/LinkMenu.m src/dylib/Patches/LittleDia/Options.m \
+	src/dylib/Patches/Peek/Peek.m src/dylib/Patches/Peek/Card.m src/dylib/Patches/Peek/Pages.m \
+	src/dylib/Patches/Peek/Keys.m src/dylib/Patches/Peek/Chat.m src/dylib/Patches/Peek/ChatContext.m \
+	src/dylib/Patches/Peek/Visibility.m src/dylib/Patches/Peek/Motion.m src/dylib/Patches/Peek/Selection.m \
+	src/dylib/Patches/Peek/Handoff.m \
+	src/dylib/Patches/Peek/Tab.m src/dylib/Patches/Peek/Zoom.m \
+	$(LAUNCH_FLAGS) src/dylib/Patches/SplitClientHello/SplitClientHello.m \
+	src/dylib/Patches/SplitClientHello/Split.m src/dylib/Patches/SplitClientHello/Write.m src/dylib/Patches/SplitClientHello/Send.m
+
+build/combinatorial-stability: tests/combinatorial-stability.m tests/watchdog.h $(COMBINATORIAL) src/dylib/SafeMode/SafeMode.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/combinatorial-stability.m $(COMBINATORIAL)
+
+check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/settings-preview build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/ai-history-search build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/pinned-split-close build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/patches.json
 	tests/tweaks-update
 	build/diapatch-tests
 	build/group-tabs
@@ -206,10 +359,13 @@ check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-for
 	build/peek-cursor
 	build/peek-link
 	build/peek-lifecycle
+	build/peek-tabs
+	build/peek-chat
 	build/safe-mode
 	build/pause
 	build/hook-table
 	build/updates-runtime
+	build/settings-preview
 	build/runtime-guards
 	build/drag-offset
 	build/small-tab-shape
@@ -230,15 +386,23 @@ check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-for
 	build/tab-titles
 	build/show-address-field
 	build/hide-chat-button
+	build/hide-connect-app-prompt
 	build/open-sidebar-instantly
+	build/ai-history-search
 	build/native-messaging
 	build/diapatch-passkeys
 	build/passkeys-origin
 	build/app-icon-signing
 	build/window-patches
 	build/pinned-tab-close-button
+	build/pinned-split-close
 	build/sidebar-tab-bugs
 	build/unload-tab
+	build/profile-color-picker
+	build/historical-regressions
+	build/abi-kvc-kvo
+	build/view-reuse-layout
+	build/combinatorial-stability
 	tests/sidebar-grain
 	scripts/check-patches
 

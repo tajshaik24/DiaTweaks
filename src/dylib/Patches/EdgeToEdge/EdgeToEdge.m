@@ -16,8 +16,18 @@ static NSEdgeInsets DPGaps(NSView *superview, NSRect frame) {
 
 static BOOL DPIsPadding(CGFloat gap) { return fabs(gap - DPWindowPadding) < 0.5; }
 
-static NSRect DPEdgeToEdgeFrame(NSView *view, NSRect frame) {
-    CGFloat inset = DPEdgeToEdge.progress * DPWindowPadding;
+BOOL DPWindowFullScreen(NSWindow *window) {
+    return window && (window.styleMask & NSWindowStyleMaskFullScreen);
+}
+
+// How far edge-to-edge is applied: the patch's own ease, held back while the option asks for full screen only.
+CGFloat DPEdgeToEdgeAmount(NSView *view) {
+    if (DPFullScreenOnly.progress <= 0 || DPWindowFullScreen(view.window)) return DPEdgeToEdge.progress;
+    return DPEdgeToEdge.progress * (1 - DPFullScreenOnly.progress);
+}
+
+static NSRect DPEdgeToEdgeFrame(NSView *view, NSRect frame, CGFloat amount) {
+    CGFloat inset = amount * DPWindowPadding;
     NSView *superview = view.superview;
     if (inset == 0 || !superview || DPChatCard(view)) return frame;
     NSEdgeInsets gaps = DPGaps(superview, frame);
@@ -42,8 +52,11 @@ CGFloat DPBaseCornerRadius(NSView *container) {
 static void DPSetCornerRadius(NSView *container, CGFloat inset) {
     CGFloat *radius = DPIvar(container, "cornerRadius");
     if (!radius) return;
-    CGFloat base = DPBaseCornerRadius(container), target = MAX(0, base + inset + DPWindowCornerGrowth(container.window));
-    DPOverride(container, &DPRadiusKey, @(base), @(target));
+    CGFloat growth = DPWindowCornerGrowth(container.window);
+    if (inset == 0 && growth == 0 && !DPGet(container, &DPRadiusKey)) return;
+    CGFloat base = DPBaseCornerRadius(container), target = MAX(0, base + inset + growth);
+    if (target != base) DPOverride(container, &DPRadiusKey, @(base), @(target));
+    else if (DPGet(container, &DPRadiusKey)) DPSet(container, &DPRadiusKey, nil);
     if (*radius == target) return;
     *radius = target;
     container.needsLayout = YES;
@@ -67,21 +80,28 @@ void DPAnimateLayer(NSView *container, CALayer *layer, NSString *key, id value) 
 }
 
 static void DPContainer_setFrame(NSView *self, SEL _cmd, NSRect frame) {
-    NSAnimationContext *context = NSAnimationContext.currentContext;
-    if (context.allowsImplicitAnimation || CATransaction.animationDuration > 0) {
-        CFTimeInterval duration = context.duration ?: CATransaction.animationDuration;
-        CAMediaTimingFunction *timing = context.timingFunction ?: [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionDefault];
-        DPSet(self, &DPAnimationKey, @[ @(CACurrentMediaTime() + duration), timing ]);
+    BOOL active = DPEdgeToEdge.on || DPEdgeToEdge.progress > 0 || DPWindowCorners.on;
+    if (active) {
+        NSAnimationContext *context = NSAnimationContext.currentContext;
+        if (context.allowsImplicitAnimation || CATransaction.animationDuration > 0) {
+            CFTimeInterval duration = context.duration ?: CATransaction.animationDuration;
+            CAMediaTimingFunction *timing = context.timingFunction ?: [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionDefault];
+            DPSet(self, &DPAnimationKey, @[ @(CACurrentMediaTime() + duration), timing ]);
+        }
+    } else if (DPGet(self, &DPAnimationKey)) {
+        DPSet(self, &DPAnimationKey, nil);
     }
     DPSet(self, &DPRequestedFrameKey, @(frame));
     [DPContainers addObject:self];
-    NSRect adjusted = DPMayAdjust(self) ? DPEdgeToEdgeFrame(self, frame) : frame;
-    DPSetCornerRadius(self, NSEqualRects(adjusted, frame) ? 0 : DPEdgeToEdge.progress * DPWindowPadding);
+    CGFloat amount = active && DPMayAdjust(self) ? DPEdgeToEdgeAmount(self) : 0;
+    NSRect adjusted = amount > 0 ? DPEdgeToEdgeFrame(self, frame, amount) : frame;
+    DPSetCornerRadius(self, NSEqualRects(adjusted, frame) ? 0 : amount * DPWindowPadding);
     DPCallOriginal(DPContainer_setFrame, self, adjusted);
 }
 
-static void DPRelayoutContainers(void) {
-    for (NSView *container in DPContainers) {
+void DPRelayoutContainers(void) {
+    // Setting a frame re-enters the hook, which adds to DPContainers, so walk a snapshot.
+    for (NSView *container in DPContainers.allObjects) {
         NSValue *requested = DPRequestedFrame(container);
         if (requested) container.frame = requested.rectValue;
         container.needsLayout = container.needsDisplay = YES;
@@ -99,7 +119,7 @@ static NSString *DPVerifyEdgeToEdge(DPPatch *patch) {
         BOOL square = patch->on && DPFullScreen(container);
         if (layer && (DPCornersRound(layer, YES) == square || (!DPBesideSidebar(container) && DPCornersRound(layer, NO) == square)))
             return square ? @"corners stay round in full screen" : @"corners are square out of full screen";
-        if (!patch->on || DPChatCard(container)) {
+        if (!patch->on || DPEdgeToEdgeAmount(container) == 0 || DPChatCard(container)) {
             if (!NSEqualRects(container.frame, requested.rectValue)) return @"web content isn't where Dia put it";
             continue;
         }

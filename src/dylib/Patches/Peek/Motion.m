@@ -140,11 +140,12 @@ static void DPPeekRevealControls(NSView *controls) {
 @property (nonatomic, weak) DPPeekCard *peek;
 @property (nonatomic, strong) CADisplayLink *link;
 @property (nonatomic) CFTimeInterval start, response, duration;
+@property (nonatomic) NSUInteger settledFrames;
 @property (nonatomic, copy) void (^done)(void);
 @end
 
 @implementation DPPeekGrowth
-static char DPGrowthKey;
+static char DPGrowthKey, DPInTimerKey;
 
 + (void)grow:(DPPeekCard *)peek done:(void (^)(void))done {
     DPPeekGrowth *growth = [DPPeekGrowth new];
@@ -154,7 +155,7 @@ static char DPGrowthKey;
     growth.done = done;
     growth.start = CACurrentMediaTime();
     DPSet(peek, &DPGrowthKey, growth);  // The display link doesn't retain it.
-    growth.link = [peek displayLinkWithTarget:growth selector:@selector(step)];
+    growth.link = [peek.window displayLinkWithTarget:growth selector:@selector(step)];
     growth.link.preferredFrameRateRange = DPPeekFrameRate;
     [growth.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }
@@ -168,16 +169,22 @@ static char DPGrowthKey;
 - (void)step {
     DPPeekCard *peek = self.peek;
     if (!peek || !peek.window || !peek.superview) {
+        void (^done)(void) = self.done;
         [self stop];
         if (peek) DPSet(peek, &DPGrowthKey, nil);
+        if (peek && done) done();
         return;
     }
     CFTimeInterval t = CACurrentMediaTime() - self.start;
     BOOL settled = t >= self.duration;
-    peek.grown = settled ? 1 : 1 - DPPeekRemaining(t, self.response);
-    peek.needsLayout = YES;
-    [peek layoutSubtreeIfNeeded];
+    if (peek.grown < 1) {
+        peek.grown = settled ? 1 : 1 - DPPeekRemaining(t, self.response);
+        peek.needsLayout = YES;
+        [peek layoutSubtreeIfNeeded];
+    }
     if (!settled) return;
+    // Give the opening mesh and Chromium's full viewport time to present before handoff.
+    if (peek.window && !peek.isHiddenOrHasHiddenAncestor && ([peek.card.layer animationForKey:@"peek"] || ++self.settledFrames < 3)) return;
     void (^done)(void) = self.done;
     [self stop];
     DPSet(peek, &DPGrowthKey, nil);
@@ -191,17 +198,29 @@ static char DPGrowthKey;
     DPPeekGrowth *growth = DPGet(self, &DPGrowthKey);
     [growth stop];
     if (growth) DPSet(self, &DPGrowthKey, nil);
+    NSTimer *inTimer = DPGet(self, &DPInTimerKey);
+    [inTimer invalidate];
+    if (inTimer) DPSet(self, &DPInTimerKey, nil);
 }
 
 - (void)animateIn {
     self.controls.alphaValue = self.card.alphaValue = self.dim.alphaValue = 0;
     CFTimeInterval start = CACurrentMediaTime();
     __weak DPPeekCard *weak = self;
-    [NSTimer scheduledTimerWithTimeInterval:1 / 120.0 repeats:YES block:^(NSTimer *timer) {
+    NSTimer *inTimer = [NSTimer scheduledTimerWithTimeInterval:1 / 120.0 repeats:YES block:^(NSTimer *timer) {
         DPPeekCard *peek = weak;
-        if (!peek || peek.closing) return [timer invalidate];
-        if (![[(NSObject *)peek.page valueForKey:@"isReadyToDisplay"] boolValue] && CACurrentMediaTime() - start < 0.15) return;
+        if (!peek || peek.closing) {
+            [timer invalidate];
+            if (peek) DPSet(peek, &DPInTimerKey, nil);
+            return;
+        }
+        if (![DPValueForKey(peek.page, @"isReadyToDisplay") boolValue] && CACurrentMediaTime() - start < 0.15) return;
         [timer invalidate];
+        DPSet(peek, &DPInTimerKey, nil);
+        if (peek.isHiddenOrHasHiddenAncestor) {
+            peek.card.alphaValue = peek.dim.alphaValue = peek.controls.alphaValue = 1;
+            return;
+        }
         [CATransaction begin];
         [CATransaction setCompletionBlock:^{
             if (!peek.closing) DPPeekRevealControls(peek.controls);
@@ -211,6 +230,7 @@ static char DPGrowthKey;
         [peek.dim.layer addAnimation:DPPeekDim(YES) forKey:@"peek"];
         [CATransaction commit];
     }];
+    DPSet(self, &DPInTimerKey, inTimer);
 }
 
 - (void)animateOut:(void (^)(void))completion {
@@ -224,8 +244,18 @@ static char DPGrowthKey;
 }
 
 - (void)animateExpand:(void (^)(void))completion {
+    BOOL openingNotShown = self.card.alphaValue == 0;
+    CALayer *dim = self.dim.layer.presentationLayer;
+    CGFloat opacity = openingNotShown ? 0 : dim ? dim.opacity : self.dim.alphaValue;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    // A promotion before the first Peek frame still starts its motion at the link.
+    if (openingNotShown) DPPeekTravel(self, YES);
     self.card.alphaValue = self.dim.alphaValue = 1;
-    [self.dim.layer addAnimation:DPPeekDim(NO) forKey:@"peek"];
+    CASpringAnimation *undim = DPPeekDim(NO);
+    undim.fromValue = @(opacity);
+    [self.dim.layer addAnimation:undim forKey:@"peek"];
+    [CATransaction commit];
     [DPPeekGrowth grow:self done:completion];
 }
 

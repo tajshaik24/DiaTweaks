@@ -18,6 +18,7 @@ body:
       multiple: true
       options:
         - Edge-to-Edge Web Pages
+        - Only in Full Screen
         - Square Corners Next to Sidebar
         - Hide Toolbar
         - Show Toolbar on Hover
@@ -31,6 +32,7 @@ body:
         - Extensions Shortcut
         - Tidy Tabs
         - Profile Emoji
+        - Profile Color Picker
         - Switch Profiles with ⌘1–9
         - Translucent Sidebar
         - Compact Sidebar Header
@@ -43,6 +45,7 @@ body:
         - Hide Site Not Working Prompt
         - Close Tabs from Tab Switcher
         - Unload Tabs
+        - Unload Pinned Splits
         - Undo Closing a Tab
         - Pin Tab Shortcut
         - Save Page As
@@ -59,6 +62,8 @@ body:
         - Hide New Tab Until Opened
         - Hide History Suggestions
         - Hide New Tab Logo
+        - Chat Model
+        - Fall Back to Dia Default
         - Turn Off AI
         - Morning Brief Language
         - Hide Chat Button
@@ -66,16 +71,21 @@ body:
         - Hide Upgrade Banner
         - Hide Personalize Button
         - Hide Skills Suggestions
+        - Hide Connect App Prompt
+        - Exclude Sites from AI History Search
         - Window Material
         - Keep Windows Active
         - Drag Window from Page
+        - Zoom on Double-Click
         - Window Corners
         - App Icon
         - Hide Window Controls
         - Private Window Theme
         - Skip Account
+        - Launch Flags
         - Allow 1Password
         - Allow Bitwarden
+        - Allow Proton Pass
         - Allow iCloud Passkeys
         - Allow iCloud Passwords
         - Group Tabs by Domain

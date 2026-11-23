@@ -34,6 +34,9 @@ static void DPRunScenario(NSArray<NSArray<NSString *> *> *scenarios, NSUInteger 
     if (index == scenarios.count) return done();
     NSString *bits = scenarios[index][1];
     for (NSUInteger i = 0; i < DPPatchCount; i++) DPSetPatch(DPPatches[i], [bits characterAtIndex:i] == '1', NO);
+    // Settings posts this after every flip, and tweaks that follow another tweak's switch (Turn Off AI) only
+    // re-apply on it, so a scenario has to post it too or those tweaks are checked against the last scenario.
+    [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
     NSMutableDictionary<NSString *, NSString *> *(^check)(void) = ^NSMutableDictionary<NSString *, NSString *> *(void) {
         NSMutableDictionary<NSString *, NSString *> *failures = [NSMutableDictionary new];
         for (NSUInteger i = 0; i < DPPatchCount; i++) {

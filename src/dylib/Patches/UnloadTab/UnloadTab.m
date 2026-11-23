@@ -71,21 +71,48 @@ static BOOL DPTabOpen(NSView *tab, NSString *tabID) {
     return tabID && tab.window && [tabID isEqualToString:DPActiveTabID(tab.window)];
 }
 
+static char DPUnloadItemKey;
+
+static void DPRemoveUnloadItems(NSMenu *menu) {
+    for (NSMenuItem *item in [menu.itemArray copy])
+        if (DPGet(item, &DPUnloadItemKey)) [menu removeItem:item];
+}
+
 static void DPAddUnloadMenuItem(NSMenu *menu, NSView *tab, NSString *tabID, id page, NSView *closePane) {
     BOOL open = DPTabOpen(tab, tabID);
     BOOL visible = page ? DPPageIsVisible(page) : open;
     NSWindow *window = tab.window;
     id before = visible && open ? DPTabBefore(window) : nil;
+    NSString *tabIDCopy = [tabID copy];
+    __weak NSWindow *weakWindow = window;
+    __weak NSView *weakTab = tab, *weakClosePane = closePane;
+    __weak id weakPage = page;
     NSMenuItem *item = DPMenuItem(@"Unload Tab", ^{
-        if (before) DPForgetFrontTab(window);
-        if (page) return DPUnloadPage(page, before);
-        if (before) DPFocusTab(before);
+        if (!DPUnloadTab.on) return;
+        NSWindow *win = weakWindow;
+        NSView *targetTab = weakTab, *targetClose = weakClosePane;
+        id targetPage = weakPage;
+        BOOL isOpen = targetTab && DPTabOpen(targetTab, tabIDCopy);
+        if (targetPage) {
+            if (!DPPageIsTracked(targetPage) || DPPageIsDiscarded(targetPage)) return;
+            BOOL isVisible = DPPageIsVisible(targetPage);
+            id targetBefore = isVisible && isOpen && win ? DPTabBefore(win) : nil;
+            if (isVisible && !targetBefore) return;
+            if (targetBefore && win) DPForgetFrontTab(win);
+            DPUnloadPage(targetPage, targetBefore);
+            return;
+        }
+        if (!targetClose || !targetClose.window || DPIsClosedPinned(targetClose)) return;
+        id targetBefore = isOpen && win ? DPTabBefore(win) : nil;
+        if (targetBefore && win) DPForgetFrontTab(win);
+        if (targetBefore) DPFocusTab(targetBefore);
         DPMarkOwnClose();
-        DPCloseKeepingTab(closePane);
+        DPCloseKeepingTab(targetClose);
     });
+    DPSet(item, &DPUnloadItemKey, @YES);
     item.image = [NSImage imageWithSystemSymbolName:@"moon.zzz" accessibilityDescription:nil];
     // By name: CI's SDK predates macOS 27. 1 is NSMenuItemImageVisibilityVisible.
-    if (@available(macOS 27, *)) [item setValue:@1 forKey:@"preferredImageVisibility"];
+    if (@available(macOS 27, *)) DPSetValueForKey(item, @"preferredImageVisibility", @1);
     item.enabled = closePane != nil || !visible || before != nil;
     NSInteger index = [menu indexOfItemWithTitle:@"Close"];
     if (index < 0) index = [menu indexOfItemWithTitle:@"Close Tab"];
@@ -95,7 +122,9 @@ static void DPAddUnloadMenuItem(NSMenu *menu, NSView *tab, NSString *tabID, id p
 
 static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     NSMenu *menu = DPCallOriginal(DPTab_menuForEvent, self, event);
-    if (!menu || !DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
+    if (!menu) return nil;
+    DPRemoveUnloadItems(menu);
+    if (!DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
     DPRecordVisiblePanePages();
     NSView *pane = DPFindView(self, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabContentView); });
     if (pane && DPIsClosedPinned(pane)) return menu;
@@ -112,7 +141,9 @@ static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
 
 static NSMenu *DPPinnedTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     NSMenu *menu = DPCallOriginal(DPPinnedTab_menuForEvent, self, event);
-    if (!menu || !DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
+    if (!menu) return nil;
+    DPRemoveUnloadItems(menu);
+    if (!DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
     DPRecordVisiblePanePages();
     NSString *tabID = nil, *contentID = nil;
     if (!DPPinnedTabInfo(self, &tabID, &contentID)) return menu;
@@ -145,7 +176,8 @@ static NSString *DPVerifyTab(NSView *tab, BOOL on, BOOL dock, NSCountedSet<NSURL
         if (!front || ![url.scheme hasPrefix:@"http"] || [urls countForObject:url] > 1) return nil;
     }
     if (!item) return dock ? @"loaded pinned tab has no Unload Tab" : front ? @"tab in front has no Unload Tab" : @"loaded tab has no Unload Tab";
-    if (front && !item.enabled && [[DPScriptWindow(tab.window) valueForKey:@"appleScriptTabs"] count] > 1)
+    id scriptTabs = DPValueForKey(DPScriptWindow(tab.window), @"appleScriptTabs");
+    if (front && !item.enabled && [scriptTabs isKindOfClass:NSArray.class] && [scriptTabs count] > 1)
         return dock ? @"Unload Tab can't leave the pinned tab in front" : @"Unload Tab can't leave the tab in front";
     return nil;
 }
