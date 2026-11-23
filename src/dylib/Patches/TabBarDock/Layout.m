@@ -123,7 +123,7 @@ NSString *DPVerifyTabBars(DPPatch *patch) {
         if (patch == &DPHidePinnedTabsInTabBar) {
             if (patch->on && !hiddenByUs && DPPinnedTabsShow(dock)) return @"pinned tabs still show in the tab bar";
             if (!patch->on && DPPinnedTabsHiddenByUs(dock)) return @"pinned tabs still hidden";
-        } else if (!hiddenByUs && DPProfileNameHidden(dock) != patch->on) {
+        } else if (!hiddenByUs && DPHasProfileName(dock) && DPProfileNameHidden(dock) != patch->on) {
             return patch->on ? @"profile name still shows" : @"profile name still hidden";
         }
         if (DPDockEmpty(dock) && !dock.hidden) return @"the box beside the window buttons shows with nothing in it";

@@ -15,5 +15,7 @@ BOOL DPPinnedTabsHiddenByUs(NSView *dock);
 BOOL DPPinnedTabsShow(NSView *dock);
 BOOL DPProfileNameShows(NSView *dock);
 BOOL DPProfileNameHidden(NSView *dock);
+// Whether the dock shows a profile name at all: with one space Dia shows no switcher pill.
+BOOL DPHasProfileName(NSView *dock);
 void DPNarrowSwitcher(NSView *dock);
 void DPCenterDots(NSView *switcher);
