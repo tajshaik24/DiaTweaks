@@ -337,6 +337,8 @@ static NSEvent *MakeRightClick(NSWindow *window) {
 - (void)_updateWindowCornerMask {}
 - (BOOL)isVisible { return self.fakeVisible; }
 - (BOOL)isKeyWindow { return self.fakeKey; }
+// DPPointerOver reads the real cursor; pin it off-window so the result doesn't depend on where the mouse is.
+- (NSPoint)mouseLocationOutsideOfEventStream { return NSMakePoint(-10000, -10000); }
 - (NSWindow *)attachedSheet { return self.fakeSheet; }
 - (NSButton *)standardWindowButton:(NSWindowButton)b { return b == NSWindowCloseButton ? self.fakeCloseButton : [super standardWindowButton:b]; }
 - (NSResponder *)firstResponder { return self.mockFirstResponder ?: [super firstResponder]; }
