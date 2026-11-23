@@ -56,6 +56,14 @@ static NSString *DPVerifyHideToolbar(DPPatch *patch) {
             if (fabs(DPTop(pane, view.frame) - (DPTop(pane, laidOut) - shift)) > 0.5)
                 return hidden ? @"page didn't move up into the toolbar's place" : @"page isn't below the toolbar";
         }
+        // With the bookmarks bar shown only on new tabs, Dia draws it over the top of the page rather than above it.
+        if (!found && bookmarks && !hidden) {
+            CGFloat barBottom = DPBottom(pane, DPLaidOutFrame(bar));
+            for (NSView *view in pane.subviews) {
+                CGFloat top = DPTop(pane, DPLaidOutFrame(view));
+                if (![bars containsObject:view] && !view.hidden && top > barBottom - 0.5 && top < edge - 0.5) found = YES;
+            }
+        }
         if (!found) return @"no page found below the toolbar";
     }
     return nil;
