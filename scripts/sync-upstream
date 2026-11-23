@@ -25,7 +25,12 @@ fail() {
         note=$(cat "$SYNC_CLAUDE_NOTE" 2>/dev/null || echo "Claude left no account of what it tried; see the run.")
         body=$(printf '%s\n\n### Claude tried first\n\n%s' "$body" "$note")
     fi
-    issue=$(gh issue list -R "$repo" --state open --search 'in:title "Upstream sync needs a hand"' --json number --jq '.[0].number // empty')
+    # With issues turned off, the failed run (and GitHub's email about it) is the only signal, so say it all here.
+    issue=$(gh issue list -R "$repo" --state open --search 'in:title "Upstream sync needs a hand"' --json number --jq '.[0].number // empty' 2>/dev/null) || {
+        printf '%s\n' "$body" >&2
+        [ -z "${GITHUB_STEP_SUMMARY:-}" ] || printf '## Upstream sync needs a hand\n\n%s\n' "$body" >> "$GITHUB_STEP_SUMMARY"
+        exit 1
+    }
     if [ -n "$issue" ]; then gh issue comment "$issue" -R "$repo" --body "$body"
     else gh issue create -R "$repo" --title "Upstream sync needs a hand" --body "$body"; fi
     exit 1
@@ -34,8 +39,8 @@ fail() {
 # resolved WHY: close that issue once main has caught up, whether this run or a person did it.
 resolved() {
     [ "$dry_run" != --dry-run ] || return 0
-    issue=$(gh issue list -R "$repo" --state open --search 'in:title "Upstream sync needs a hand"' --json number --jq '.[0].number // empty')
-    [ -z "$issue" ] || gh issue close "$issue" -R "$repo" --comment "$1 ($run_url)"
+    issue=$(gh issue list -R "$repo" --state open --search 'in:title "Upstream sync needs a hand"' --json number --jq '.[0].number // empty' 2>/dev/null) || return 0
+    [ -z "$issue" ] || gh issue close "$issue" -R "$repo" --comment "$1 ($run_url)" || true
 }
 
 git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/JaceThings/DiaTweaks.git
