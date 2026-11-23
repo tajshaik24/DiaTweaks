@@ -62,6 +62,8 @@ DPPatch *DPRequired(DPPatch *patch);
 int DPDeclaredOrder(DPPatch *patch);  // Where the tweak sits in the source, before Settings order.
 void DPSetPatch(DPPatch *patch, BOOL on, BOOL save);
 void DPApplySavedSettings(void);
+// DiaTweaks' settings domain: com.diapatches, or DIATWEAKS_DOMAIN for a test copy of Dia.
+NSString *DPSettingsDomain(void);
 BOOL DPEffectiveOn(DPPatch *patch);
 BOOL DPAnimating(void);
 BOOL DPSavedOn(DPPatch *patch);

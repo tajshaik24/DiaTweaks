@@ -89,7 +89,7 @@ static void DPListen(NSString *name, void (*handler)(NSNotification *)) {
 }
 
 void DPInstallDevTools(void) {
-    if (![[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] boolForKey:@"devTools"]) return;
+    if (![[[NSUserDefaults alloc] initWithSuiteName:DPSettingsDomain()] boolForKey:@"devTools"]) return;
     DPListen(@"com.diapatches.dev.set", DPScriptSet);
     DPListen(@"com.diapatches.dev.type", DPScriptType);
     DPListen(@"com.diapatches.dev.methods", DPScriptMethods);

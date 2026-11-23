@@ -219,7 +219,7 @@ static void DPReadPatches(BOOL includeLocal) {
 }
 
 // DIATWEAKS_DOMAIN lets a test copy of Dia keep its switches apart from yours, as it does for diapatch and diatweaks.
-static NSString *DPSettingsDomain(void) { return @(getenv("DIATWEAKS_DOMAIN") ?: "com.diapatches"); }
+NSString *DPSettingsDomain(void) { return @(getenv("DIATWEAKS_DOMAIN") ?: "com.diapatches"); }
 
 void DPLoadPatches(void) {
     DPDefaults = [[NSUserDefaults alloc] initWithSuiteName:DPSettingsDomain()];
