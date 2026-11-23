@@ -1,7 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
 static BOOL DPIsNewTabLogo(NSView *view) {
-    if (!DPIsKind(view, DPDiaNewTabLogo) && !DPIsKind(view, DPDiaNewTabLogoParticles)) return NO;
+    if (!DPIsKind(view, DPDiaNewTabLogo) && !DPIsKind(view, DPDiaNewTabLogoParticles) && !DPIsKind(view, DPDiaNewTabLogoView)) return NO;
     for (NSView *up = view.superview; up; up = up.superview)
         if (DPIsKind(up, DPDiaNewTabPage)) return YES;
     return NO;

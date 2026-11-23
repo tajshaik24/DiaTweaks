@@ -96,6 +96,7 @@
 #define DPDiaDefaultBrowserBanner "_TtC14DefaultBrowser24DefaultBrowserUpsellView"
 #define DPDiaNewTabLogo         "_TtC15Personalization13DiaIconButton"
 #define DPDiaNewTabLogoParticles "_TtC7PowerUp16LogoParticleView"
+#define DPDiaNewTabLogoView     "NewTabPage.LogoView"  // Dia 1.58+: the logo above the search field
 #define DPDiaSkillsSuggestions  "_TtC17SkillsSuggestions21SkillsSuggestionsView"
 #define DPDiaNewTabButton       "_TtC7TabList14NewTabCellView"
 #define DPDiaBrowserContext     "ArcBrowserContext"
