@@ -1,0 +1,98 @@
+#!/bin/sh
+# A second Dia for `make test`, so testing never quits your Dia or touches its windows, tabs, settings or sync.
+#
+#   scripts/test-dia setup   make build/test-dia/DiaTest.app from /Applications/Dia.app (again when Dia updates)
+#   scripts/test-dia run ARGS...   start it with ARGS added to its environment (KEY=VALUE), in the background
+#   scripts/test-dia stop    quit it
+#
+# The copy has its own bundle ID (so its own Dia settings), loads build/test-dia/DiaPatches.dylib instead of the
+# installed DiaTweaks, keeps all its data under build/test-dia/home, uses DiaTweaks settings from DIATWEAKS_DOMAIN,
+# skips Dia's intro and sign-in, and runs inside a sandbox profile that can't read or write your Dia's data at all.
+set -eu
+cd "$(dirname "$0")/.."
+dir=$PWD/build/test-dia
+app=$dir/DiaTest.app
+bin=$app/Contents/MacOS/Dia-real
+id=company.thebrowser.dia.diatweaks-test
+tweaks=com.diapatches.diatweaks-test
+source_app=${DIAPATCH_APP:-/Applications/Dia.app}
+installed="$HOME/Library/Application Support/DiaPatches/DiaPatches.dylib"
+
+running() { pgrep -f "^$bin" >/dev/null 2>&1; }
+
+stop() {
+    running || return 0
+    # A normal quit, so Dia saves this window state for the next run (Auto-Hide Tabs is set through it).
+    osascript -e "tell application id \"$id\" to quit" >/dev/null 2>&1 || true
+    for _ in $(seq 40); do running || return 0; sleep 0.5; done
+    pkill -f "^$bin" || true
+    while running; do sleep 0.5; done
+}
+
+start() {
+    mkdir -p "$dir/home"
+    cp build/DiaPatches.dylib "$dir/.DiaPatches.dylib.$$" && mv -f "$dir/.DiaPatches.dylib.$$" "$dir/DiaPatches.dylib"
+    env "$@" nohup "$app/Contents/MacOS/Dia" >"$dir/run.log" 2>&1 &
+}
+
+setup() {
+    version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$source_app/Contents/Info.plist")
+    have=$(cat "$dir/.version" 2>/dev/null || true)
+    if [ "$have" != "$version" ] || [ ! -x "$bin" ]; then
+        stop
+        rm -rf "$app"
+        mkdir -p "$dir"
+        cp -c -R "$source_app" "$app" 2>/dev/null || ditto "$source_app" "$app"  # a clone where APFS allows it
+        plist=$app/Contents/Info.plist
+        /usr/libexec/PlistBuddy -c "Set CFBundleIdentifier $id" -c 'Set CFBundleName Dia Test' "$plist"
+        # It mustn't offer to open links or files, or update itself.
+        for key in CFBundleURLTypes CFBundleDocumentTypes SUFeedURL; do /usr/libexec/PlistBuddy -c "Delete $key" "$plist" 2>/dev/null || true; done
+        # App Icon links Assets.car to your icon, outside the bundle, which codesign refuses.
+        car=$app/Contents/Resources/Assets.car
+        if [ -L "$car" ]; then target=$(readlink "$car"); rm "$car"; cp "$target" "$car"; fi
+        mv "$app/Contents/MacOS/Dia" "$bin"
+        install_name_tool -change "$installed" "$dir/DiaPatches.dylib" "$bin" 2>/dev/null
+        otool -L "$bin" | grep -qF "$dir/DiaPatches.dylib" || { echo "the test Dia doesn't load build/test-dia/DiaPatches.dylib; is /Applications/Dia.app patched (./install.sh)?" >&2; exit 1; }
+        # Dia and DiaTweaks relaunch Dia through Launch Services, which passes no arguments or environment, so the
+        # app's executable is this wrapper: however the copy starts, it's sandboxed and uses only its own data.
+        # Chromium's own sandbox can't start inside the guard, so it's off for this copy only.
+        cat > "$app/Contents/MacOS/Dia" <<WRAP
+#!/bin/sh
+export DIAPATCH_HOME="$dir/home" DIATWEAKS_DOMAIN="$tweaks"
+exec /usr/bin/sandbox-exec -f "$dir/guard.sb" "$bin" --user-data-dir="$dir/home/UserData" --use-mock-keychain --no-sandbox "\$@"
+WRAP
+        chmod +x "$app/Contents/MacOS/Dia"
+        codesign --force --deep --sign - "$app" >/dev/null 2>&1
+        codesign --verify --deep --strict "$app"
+        printf '%s' "$version" > "$dir/.version"
+    fi
+    cat > "$dir/guard.sb" <<EOF
+(version 1)
+(allow default)
+(deny file-read* file-write*
+  (subpath "$HOME/Library/Application Support/Dia")
+  (subpath "$HOME/Library/Application Support/DiaPatches")
+  (subpath "$HOME/Library/Caches/company.thebrowser.dia")
+  (subpath "$HOME/Library/HTTPStorages/company.thebrowser.dia")
+  (subpath "$HOME/Library/WebKit/company.thebrowser.dia")
+  (subpath "$HOME/Library/Saved Application State/company.thebrowser.dia.savedState")
+  (literal "$HOME/Library/Preferences/company.thebrowser.dia.plist")
+  (literal "$HOME/Library/Preferences/com.diapatches.plist"))
+EOF
+    defaults write "$id" hasPresentedOnboardingIntro -bool YES
+    defaults write "$tweaks" skipAccount -bool YES
+    # The first run makes a window; quitting saves its state, which test.sh edits for the Auto-Hide Tabs run.
+    if ! defaults read "$id" persistedWindowData >/dev/null 2>&1; then
+        start
+        for _ in $(seq 60); do osascript -e "tell application id \"$id\" to count windows" 2>/dev/null | grep -q '[1-9]' && break; sleep 0.5; done
+        sleep 2
+        stop
+    fi
+}
+
+case ${1:-} in
+setup) setup ;;
+run) shift; start "$@" ;;
+stop) stop ;;
+*) echo "usage: scripts/test-dia setup|run [KEY=VALUE...]|stop" >&2; exit 2 ;;
+esac
