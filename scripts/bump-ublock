@@ -1,6 +1,6 @@
 #!/bin/sh
 # Pins the uBlock Origin tweak to uBlock Origin's latest stable release and opens a pull request for it.
-# Run weekly by .github/workflows/ublock.yml; needs GH_TOKEN. With --check it only says whether one is due; with
+# Run daily by scripts/sync-upstream (with --dry-run); needs GH_TOKEN. With --check it only says whether one is due; with
 # --dry-run it downloads, checks and edits Download.m but leaves git alone.
 set -eu
 cd "$(dirname "$0")/.."

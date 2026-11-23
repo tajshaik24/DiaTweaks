@@ -1,0 +1,33 @@
+name: Sync upstream
+
+# Every day, merge JaceThings/DiaTweaks, pin uBlock Origin's latest release, check the build, and publish a
+# v<upstream>-taj.<n> release when anything changed. A conflict or failing check opens an issue instead.
+on:
+  schedule:
+    - cron: "23 10 * * *"  # Daily, 10:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-upstream
+
+jobs:
+  sync:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      # GITHUB_TOKEN can't push a merge that changes .github/workflows; a SYNC_TOKEN with Contents and Workflows
+      # write access can. Without one, such a merge stops with an issue.
+      GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - run: scripts/sync-upstream

@@ -2,7 +2,8 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    # Only the fork's own tags: upstream's (pushed so release notes diff from them) aren't releases here.
+    tags: ["v*-taj.*"]
   workflow_dispatch:
     inputs:
       tag:

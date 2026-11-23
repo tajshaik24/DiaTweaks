@@ -1,0 +1,118 @@
+#!/bin/sh
+# Merges JaceThings/DiaTweaks into the fork, pins uBlock Origin's latest release, checks the build, and publishes
+# a v<upstream>-taj.<n> release. Run daily by .github/workflows/sync.yml; needs GH_TOKEN.
+# A merge conflict or a failing check stops it before anything is pushed and opens an issue instead.
+# --dry-run merges, bumps and checks, but pushes and releases nothing.
+set -eu
+cd "$(dirname "$0")/.."
+repo=${GITHUB_REPOSITORY:-tajshaik24/DiaTweaks}
+run_url=${GITHUB_SERVER_URL:-https://github.com}/$repo/actions/runs/${GITHUB_RUN_ID:-local}
+dry_run=${1:-}
+
+# fail TITLE BODY: say why the sync stopped, on one open issue that collects every stop until someone closes it.
+fail() {
+    echo "$1" >&2
+    [ "$dry_run" != --dry-run ] || exit 1
+    body=$(printf '%s\n\n%s\n\nRun: %s' "$1" "$2" "$run_url")
+    issue=$(gh issue list -R "$repo" --state open --search 'in:title "Upstream sync needs a hand"' --json number --jq '.[0].number // empty')
+    if [ -n "$issue" ]; then gh issue comment "$issue" -R "$repo" --body "$body"
+    else gh issue create -R "$repo" --title "Upstream sync needs a hand" --body "$body"; fi
+    exit 1
+}
+
+git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/JaceThings/DiaTweaks.git
+git fetch -q upstream main
+# Upstream sometimes moves an old tag, which a plain fetch refuses to clobber.
+git fetch -q --force upstream 'refs/tags/v*:refs/tags/v*' || true
+git fetch -q --force origin 'refs/tags/v*:refs/tags/v*' || true
+before=$(git rev-parse HEAD)
+
+new=$(git rev-list --count HEAD..upstream/main)
+if [ "$new" -gt 0 ]; then
+    echo "JaceThings/DiaTweaks has $new new commits"
+    if ! git merge -q --no-edit -m "Merge JaceThings/DiaTweaks main into the fork" upstream/main; then
+        conflicts=$(git diff --name-only --diff-filter=U | sed 's/^/- `/; s/$/`/')
+        git merge --abort
+        fail "Merging $new commits from JaceThings/DiaTweaks conflicts with the fork." \
+            "These files need merging by hand (ask Claude to \"pull the main repo and make a new release\"):
+
+$conflicts"
+    fi
+fi
+
+scripts/bump-ublock --dry-run
+ublock=src/dylib/Patches/UBlockOrigin/Download.m
+ublock_version() { git show "$1:$ublock" | sed -n 's/.*kVersion = @"\([^"]*\)".*/\1/p'; }
+if ! git diff --quiet -- "$ublock"; then
+    pinned=$(sed -n 's/.*kVersion = @"\([^"]*\)".*/\1/p' "$ublock")
+    git commit -q -m "chore(dylib): pin uBlock Origin $pinned" -- "$ublock"
+fi
+
+if [ "$(git rev-parse HEAD)" = "$before" ]; then
+    echo "Nothing new upstream or from uBlock Origin"
+    exit 0
+fi
+
+log=$(mktemp)
+if ! { make && make check && cargo test --quiet --manifest-path cli/Cargo.toml; } >"$log" 2>&1; then
+    tail -40 "$log"
+    fail "The fork doesn't pass its checks after taking $new upstream commits." \
+        "Nothing was pushed. The end of the output:
+
+\`\`\`
+$(grep -E 'error|FAIL|\*\*\*' "$log" | tail -20)
+\`\`\`"
+fi
+
+# The newest upstream release tag the merge contains, then the next -taj number on it.
+base=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD)
+n=$(git tag -l "$base-taj.*" | sed 's/.*-taj\.//' | sort -n | tail -1)
+tag="$base-taj.$((${n:-0} + 1))"
+echo "Releasing $tag"
+if [ "$dry_run" = --dry-run ]; then
+    echo "would push main and $tag, and publish its release (--dry-run)"
+    exit 0
+fi
+
+git push -q origin HEAD:main ||
+    fail "GitHub refused the push of the merged main." \
+        "If upstream changed a file in .github/workflows, the default token can't push it: add a SYNC_TOKEN secret (a fine-grained token with Contents and Workflows write access), or push the merge by hand."
+git ls-remote --exit-code --tags origin "refs/tags/$base" >/dev/null 2>&1 || git push -q origin "refs/tags/$base"
+git tag "$tag"
+
+scripts/package
+notes=$(mktemp)
+GITHUB_REPOSITORY=$repo scripts/release-notes "$tag" > "$notes"
+dia=$(curl -fsSL https://releases.diabrowser.com/BoostBrowser-updates.xml |
+    python3 -I -c 'import re, sys; v = re.findall(r"shortVersionString=\"([0-9][0-9.]*)", sys.stdin.read()); print(max(v, key=lambda s: [int(p) for p in s.split(".")]) if v else "")' || true)
+wiki=$(mktemp -d)
+git clone -q --depth 1 https://github.com/JaceThings/DiaTweaks.wiki.git "$wiki" || true
+previous=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || echo "$base")
+git log --format=%s "$previous..$tag" | sed -n -E 's/^(feat|fix|perf)\(test\)!?: //p' > "$wiki.tests"
+python3 -I - "$notes" "$wiki" "$wiki.tests" "$repo" "${dia:-}" "$(ublock_version "$previous")" "$(ublock_version "$tag")" <<'EOF'
+import os, re, sys
+path, wiki, tests, repo, dia, old_ublock, new_ublock = sys.argv[1:]
+text = open(path).read()
+# The fork has no wiki: link JaceThings' page for a tweak, or no page at all when it has none yet.
+def link(m):
+    title, page = m.group(1), m.group(2)
+    return f"**[{title}](https://github.com/JaceThings/DiaTweaks/wiki/{page})**" if os.path.exists(f"{wiki}/{page}.md") else f"**{title}**"
+text = re.sub(r"\*\*\[([^\]]+)\]\(https://github\.com/" + re.escape(repo) + r"/wiki/([^)]+)\)\*\*", link, text)
+# Fixes to the tests alone change nothing anyone installs.
+for subject in filter(None, open(tests).read().splitlines()):
+    text = text.replace("- " + subject[:1].upper() + subject[1:] + "\n", "")
+# The pin is a chore commit, so the notes leave it out unless it's added here.
+if new_ublock and new_ublock != old_ublock:
+    line = (f"- uBlock Origin updates to [{new_ublock}](https://github.com/gorhill/uBlock/releases/tag/{new_ublock}); "
+            "each Mac downloads it in the background and switches at its next restart\n")
+    if "## ⚡️ Improvements\n\n" in text:
+        text = re.sub(r"(## ⚡️ Improvements\n\n(?:- .*\n)*)", lambda m: m.group(1) + line, text, count=1)
+    else:
+        at = min(i for i in (text.find("## 🐛 Fixes"), text.find("🧪")) if i >= 0)
+        text = text[:at] + "## ⚡️ Improvements\n\n" + line + "\n" + text[at:]
+text = text.replace("Tested with Dia VERSION", f"Tested with Dia {dia}" if dia else "Built for Dia")
+open(path, "w").write(text)
+EOF
+# The release makes the tag, with the zip already on it, so a Release run the tag starts finds nothing to do.
+gh release create "$tag" -R "$repo" --target "$(git rev-parse HEAD)" --latest --title "$tag" --notes-file "$notes" build/DiaTweaks.zip
+echo "Published $tag"
