@@ -1,9 +1,10 @@
+#import <objc/runtime.h>
 #import "Test/Test.h"
 
 // The test covers both tab layouts by setting them through Dia's own AppleScript support, run inside Dia: unlike the
 // View menu, it needs no key window, which a Dia started for testing doesn't get while another app is in front.
 // Auto-Hide Tabs isn't scriptable, so the run that wants it (DIAPATCH_TEST_AUTOHIDE) turns it on through Dia's own
-// Toggle Focus Mode action, sent along the window's responder chain, which also needs no key window.
+// View > Auto-Hide Tabs item, sent to the item's own target, which needs no key window.
 
 NSMutableArray<NSString *> *DPSwitchLog;
 
@@ -67,10 +68,11 @@ NSArray<NSArray<NSString *> *> *DPAutoHideScenarios(NSArray<NSArray<NSString *> 
     return some;
 }
 
-// Dia's Toggle Focus Mode (Auto-Hide Tabs) item, found by its action so its title doesn't matter.
+// View > Auto-Hide Tabs (Dia calls it Focus Mode inside), found by its title or its action.
 static NSMenuItem *DPFocusModeItem(NSMenu *menu) {
     for (NSMenuItem *item in menu.itemArray) {
-        if (item.action && [NSStringFromSelector(item.action).lowercaseString containsString:@"focusmode"]) return item;
+        if (item.action && ([item.title isEqualToString:@"Auto-Hide Tabs"]
+                            || [NSStringFromSelector(item.action).lowercaseString containsString:@"focusmode"])) return item;
         NSMenuItem *found = item.submenu ? DPFocusModeItem(item.submenu) : nil;
         if (found) return found;
     }
@@ -96,13 +98,28 @@ void DPPrepareWindow(void (^done)(void)) {
     if (![DPScript(@"get URL of active tab of window 1") hasPrefix:@"http"])
         DPScript(@"make new tab at end of tabs of window 1 with properties {URL:\"https://example.com\"}");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        if (DPTabsHidden() != DPAutoHideRun()) {
-            NSMenuItem *item = DPFocusModeItem(NSApp.mainMenu);
-            NSWindow *window = DPFrontBrowserWindow();
-            if (!item) DPLog(@"found no Toggle Focus Mode menu item to set Auto-Hide Tabs");
-            else if (![window.firstResponder ?: window tryToPerform:item.action with:item] && ![NSApp sendAction:item.action to:nil from:item])
-                DPLog([NSString stringWithFormat:@"nothing took %@ to set Auto-Hide Tabs", NSStringFromSelector(item.action)]);
+        if (DPTabsHidden() == DPAutoHideRun()) return done();
+        NSMenuItem *item = DPFocusModeItem(NSApp.mainMenu);
+        if (!item) {
+            DPLog(@"found no Auto-Hide Tabs menu item");
+            return done();
         }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), done);
+        // Dia applies the item to the key window, and only enables it while Dia is the front app. A test Dia in the
+        // background has no key window, so for this one call AppKit reports the test window as key and main.
+        NSWindow *window = DPFrontBrowserWindow();
+        Method key = class_getInstanceMethod(NSApplication.class, @selector(keyWindow));
+        Method main = class_getInstanceMethod(NSApplication.class, @selector(mainWindow));
+        IMP oldKey = method_getImplementation(key), oldMain = method_getImplementation(main);
+        IMP ours = imp_implementationWithBlock(^NSWindow *(id app) { return window; });
+        method_setImplementation(key, ours);
+        method_setImplementation(main, ours);
+        BOOL sent = item.target && [NSApp sendAction:item.action to:item.target from:item];
+        method_setImplementation(key, oldKey);
+        method_setImplementation(main, oldMain);
+        if (!sent) DPLog([NSString stringWithFormat:@"nothing took %@ to set Auto-Hide Tabs", NSStringFromSelector(item.action)]);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            if (DPTabsHidden() != DPAutoHideRun()) DPLog(@"Auto-Hide Tabs didn't change when the test set it");
+            done();
+        });
     });
 }
