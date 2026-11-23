@@ -32,6 +32,8 @@ stop() {
 start() {
     mkdir -p "$dir/home"
     cp build/DiaPatches.dylib "$dir/.DiaPatches.dylib.$$" && mv -f "$dir/.DiaPatches.dylib.$$" "$dir/DiaPatches.dylib"
+    # Some tweaks' checks look for DiaTweaks' own helper beside their settings.
+    mkdir -p "$dir/home/bin" && cp build/diapatch "$dir/home/bin/diapatch"
     env "$@" nohup "$app/Contents/MacOS/Dia" >"$dir/run.log" 2>&1 &
 }
 
@@ -64,6 +66,10 @@ WRAP
         chmod +x "$app/Contents/MacOS/Dia"
         codesign --force --deep --sign - "$app" >/dev/null 2>&1
         codesign --verify --deep --strict "$app"
+        # The password tweaks check DiaTweaks' copy of the original Dia, in its folder; clone yours (APFS, no space).
+        rm -rf "$dir/home/pristine"; mkdir -p "$dir/home/pristine"
+        pristine="$HOME/Library/Application Support/DiaPatches/pristine/Dia.app"
+        [ ! -d "$pristine" ] || cp -c -R "$pristine" "$dir/home/pristine/Dia.app" 2>/dev/null || ditto "$pristine" "$dir/home/pristine/Dia.app"
         printf '%s' "$version" > "$dir/.version"
     fi
     cat > "$dir/guard.sb" <<EOF
@@ -81,11 +87,12 @@ WRAP
 EOF
     defaults write "$id" hasPresentedOnboardingIntro -bool YES
     defaults write "$tweaks" skipAccount -bool YES
-    # The first run makes a window; quitting saves its state, which test.sh edits for the Auto-Hide Tabs run.
-    if ! defaults read "$id" persistedWindowData >/dev/null 2>&1; then
+    # On its first launch with a new profile Dia relaunches itself once, and the relaunch doesn't carry a test run's
+    # settings, so the first launch happens here: start it, let it settle, quit.
+    if [ ! -d "$dir/home/UserData/User Data/Default" ]; then
         start
-        for _ in $(seq 60); do osascript -e "tell application id \"$id\" to count windows" 2>/dev/null | grep -q '[1-9]' && break; sleep 0.5; done
-        sleep 2
+        for _ in $(seq 120); do osascript -e "tell application id \"$id\" to count windows" 2>/dev/null | grep -q '[1-9]' && break; sleep 0.5; done
+        sleep 15
         stop
     fi
 }
