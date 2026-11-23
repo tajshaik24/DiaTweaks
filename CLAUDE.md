@@ -18,6 +18,6 @@ When the user points at that issue, or asks to "pull the main repo" / "make a ne
 
 1. `git fetch origin upstream`, then `git merge upstream/main`.
 2. For each conflict, read ours, theirs and the merge base (`git show HEAD:f`, `upstream/main:f`, `$(git merge-base HEAD upstream/main):f`). Keep every fork-only change (uBlock Origin, the Horizontal Tabs toggles, the two-layout test runner, `DIATWEAKS_DOMAIN`, links to tajshaik24/DiaTweaks releases) on top of upstream's new code. If upstream changed something a fork tweak relies on and the right fix isn't clear, stop and ask.
-3. `make`, `make check`, `cargo test --manifest-path cli/Cargo.toml` must all pass; fix what the merge broke (upstream tests sometimes call the fork's changed test helpers).
+3. `make`, `make check`, `cargo test --manifest-path cli/Cargo.toml` must all pass; fix what the merge broke. Upstream tests sometimes call the fork's changed test helpers, and some count tweaks, sections and Settings rows by hand (`tests/settings-cleanup.m`, `tests/local-tweaks.m`): add the fork's three tweaks (uBlock Origin, Hide Pinned Tabs in Tab Bar, Hide Profile Name) and two sections (Horizontal Tabs, Privacy) to upstream's numbers.
 4. Commit the merge, push `main`, then run the workflow (`gh workflow run sync.yml`) so it pins uBlock Origin, releases with cleaned-up notes, and closes the issue. Watch the run and report the release link.
 

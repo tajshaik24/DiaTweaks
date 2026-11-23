@@ -13,6 +13,7 @@ NSInteger DPSafeMode;
 BOOL DPPaused, DPPausedAtLaunch;
 BOOL DPPauseSaved(void) { return NO; }
 NSMutableArray<NSString *> *DPSwitchLog;
+BOOL DPLocalSafeModeOff(void) { return NO; }
 
 static NSView *gPane;
 static BOOL gStalledAtTheEnd, gStalledFading;
