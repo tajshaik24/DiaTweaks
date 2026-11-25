@@ -1,0 +1,11 @@
+#!/bin/sh
+# Unit tests give each run its own settings domain (com.diapatches.<test>.<pid>) and never delete it, so remove the
+# ones whose test process has exited. Your com.diapatches and the test Dia's com.diapatches.diatweaks-test stay.
+for plist in "$HOME"/Library/Preferences/com.diapatches.*.plist; do
+    [ -e "$plist" ] || continue
+    domain=$(basename "$plist" .plist)
+    pid=${domain##*.}
+    case $pid in *[!0-9]*) case $domain in com.diapatches.test.[0-9A-F]*-*) ;; *) continue ;; esac ;; *) kill -0 "$pid" 2>/dev/null && continue ;; esac
+    defaults delete "$domain" >/dev/null 2>&1 || true
+    rm -f "$plist"
+done

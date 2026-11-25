@@ -72,6 +72,7 @@ void DPSetChoice(DPPatch *patch, NSString *value);
 void DPLoadPatches(void);
 void DPWatchSavedSettings(void);
 void DPInstallPatches(void);
+void DPInstallMenuGuard(void);
 BOOL DPWriteManifest(NSString *path);
 // Local tweaks are ordinary DPPatch entries; a side table tags them so DPPatch, and a prebuilt dylib's ABI stamp, stay valid.
 BOOL DPIsLocalPatch(DPPatch *patch);

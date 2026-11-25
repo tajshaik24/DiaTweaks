@@ -21,8 +21,10 @@ __attribute__((constructor)) static void DPInit(void) {
     if (DPSafeMode == 2) return;
     DPLoadPatches();
     DPWatchSavedSettings();
-    if (!DPSafeMode && !DPPaused) DPInstallPatches();
-    else if (DPPaused && !DPSafeMode) DPDropStaleLaunchFlags();
+    if (!DPSafeMode && !DPPaused) {
+        DPInstallMenuGuard();  // First, so it sits next to AppKit beneath every tweak's menu hooks.
+        DPInstallPatches();
+    } else if (DPPaused && !DPSafeMode) DPDropStaleLaunchFlags();
     DPInstallSettings();
     DPInstallUpdates();
     DPInstallDevTools();
