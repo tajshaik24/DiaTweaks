@@ -2,7 +2,6 @@
 #import "Patches/HideToolbar/HideToolbar.h"
 
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
-DPPatch DPPeek;
 
 static BOOL gAppActive = YES, gLittleDiaOver;
 static NSWindow *gKeyWindow;
@@ -11,6 +10,7 @@ static NSPoint gMouse;
 static BOOL DPApp_isActive(NSApplication *self, SEL _cmd) { return gAppActive; }
 static BOOL DPWindow_isKeyWindow(NSWindow *self, SEL _cmd) { return self == gKeyWindow; }
 static NSPoint DPEvent_mouseLocation(NSEvent *self, SEL _cmd) { return gMouse; }
+static NSUInteger DPEvent_pressedMouseButtons(NSEvent *self, SEL _cmd) { return 0; }
 
 BOOL DPBesideSidebar(NSView *container) { return NO; }
 BOOL DPLittleDiaIsOver(NSWindow *window) { return gLittleDiaOver; }
@@ -64,6 +64,7 @@ int main(void) {
         DPHookClass(NSApp.class, @selector(isActive), (IMP)DPApp_isActive);
         DPHookClass(NSWindow.class, @selector(isKeyWindow), (IMP)DPWindow_isKeyWindow);
         DPHookClass(object_getClass(NSEvent.class), @selector(mouseLocation), (IMP)DPEvent_mouseLocation);
+        DPHookClass(object_getClass(NSEvent.class), @selector(pressedMouseButtons), (IMP)DPEvent_pressedMouseButtons);
 
         DPHideToolbar.on = NO;
         DPHideToolbar.progress = 0;
@@ -126,6 +127,19 @@ int main(void) {
         [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidUpdateNotification object:window];
         PumpUntil(^{ return (BOOL)!hover.revealed; });
         CHECK(!hover.revealed, "losing focus hides the toolbar");
+
+        __weak NSView *goneWatch = nil;
+        @autoreleasepool {
+            DPFocusView *gone = [[DPFocusView alloc] initWithFrame:NSMakeRect(10, 100, 100, 20)];
+            goneWatch = gone;
+            [page addSubview:gone];
+            [window makeFirstResponder:gone];
+            [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidUpdateNotification object:window];
+            [window makeFirstResponder:nil];
+            [gone removeFromSuperview];
+        }
+        __unsafe_unretained id lastResponder = object_getIvar(hover, class_getInstanceVariable(DPToolbarHover.class, "_lastResponder"));
+        CHECK(goneWatch == nil && lastResponder == nil, "a freed responder's address can't be mistaken for the next responder's");
 
         gKeyWindow = nil;
         [window makeFirstResponder:field];

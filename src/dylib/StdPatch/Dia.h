@@ -15,6 +15,8 @@
 #define DPDiaTabStripController "_TtC8TabStrip31TabStripContainerViewController"
 #define DPDiaTabStrip           "_TtCC8TabStrip31TabStripContainerViewControllerP33_466228EC43BE4F33691D8E9BB7BFDE208RootView"
 #define DPDiaTabStripTabs       "TabStrip.TabStripContainerView"
+#define DPDiaSidebarRoot        "_TtC10TabSidebar15SidebarRootView"
+#define DPDiaSidebarContainerRoot "_TtC10TabSidebarP33_1737451677CA9CA733FCF78BBDD9DE8A24SidebarContainerRootView"
 #define DPDiaWindowBackground   "_TtGC5ARCUI25WindowFrameBackgroundViewC15WindowTreatment24WindowBackgroundBaseView_"
 #define DPDiaWindow             "_TtC6Window14PlatformWindow"
 #define DPDiaWindowController   "_TtC6Window24PlatformWindowController"
@@ -52,6 +54,8 @@
 #define DPDiaTabSwitcher        "_TtC10RecentTabs26RecentTabsWindowController"
 #define DPDiaTabSwitcherList    "_TtC10RecentTabs24RecentTabsViewController"
 #define DPDiaSettingsController "_TtC11Preferences38SidebarPreferencesWindowViewController"
+#define DPDiaSettingsWindow     "_TtC11Preferences25PlatformPreferencesWindow"
+#define DPDiaProfilesTable      "_TtC11PreferencesP33_6E7E2AAA974892210E333FA6FCBB0CC017ProfilesTableView"
 #define DPDiaSettingsHeader     "_TtC11Preferences25SettingsSectionHeaderView"
 #define DPDiaSettingsSidebar    "_TtC11Preferences15SidebarListView"
 #define DPDiaSpaceSwitcher      "_TtC10TabSidebar17SpaceSwitcherView"
@@ -96,7 +100,7 @@
 #define DPDiaDefaultBrowserBanner "_TtC14DefaultBrowser24DefaultBrowserUpsellView"
 #define DPDiaNewTabLogo         "_TtC15Personalization13DiaIconButton"
 #define DPDiaNewTabLogoParticles "_TtC7PowerUp16LogoParticleView"
-#define DPDiaNewTabLogoView     "NewTabPage.LogoView"  // Dia 1.58+: the logo above the search field
+#define DPDiaNewTabLogoView     "NewTabPage.LogoView"
 #define DPDiaSkillsSuggestions  "_TtC17SkillsSuggestions21SkillsSuggestionsView"
 #define DPDiaNewTabButton       "_TtC7TabList14NewTabCellView"
 #define DPDiaBrowserContext     "ArcBrowserContext"
@@ -115,3 +119,6 @@
 #define DPDiaDialogPanelVC      "_TtC6Dialog25DialogPanelViewController"
 #define DPDiaDialogPanelWC      "_TtC6Dialog27DialogPanelWindowController"
 #define DPDiaAppsUpsellBar      "_TtC13AppsUpsellBar17AppsUpsellBarView"
+
+// Dia's ArcWebContentsNavigationDisposition, numbered differently from Chromium's.
+enum { DPIgnoreAction = 0, DPCurrentTab = 1, DPForegroundTab = 2, DPBackgroundTab = 3, DPNewWindow = 5, DPPopup = 6, DPSplitView = 9 };

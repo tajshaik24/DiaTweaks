@@ -1,12 +1,27 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import <os/lock.h>
 #import "StdPatch/Dia.h"
+
+typedef enum { DPSettingNone = 0, DPSettingBool, DPSettingNumber, DPSettingString } DPSettingKind;
+
+typedef struct {
+    DPSettingKind kind;
+    __unsafe_unretained NSString *key;
+    double defaultNumber, min, max;
+    BOOL defaultBool;
+    __unsafe_unretained NSString *defaultString;
+    NSString *(*problem)(NSString *value);
+} DPSetting;
+
+#define DPSettingList(...) ((const DPSetting[]){__VA_ARGS__, {0}})
 
 typedef struct DPPatch DPPatch;
 struct DPPatch {
     __unsafe_unretained NSString *key;
     BOOL defaultOn;
+    BOOL experimental;
     int order;
     __unsafe_unretained NSString *title, *detail;
     __unsafe_unretained NSString *hint;
@@ -24,6 +39,7 @@ struct DPPatch {
     NSArray<NSView *> *(*rows)(void);
     __unsafe_unretained NSString *shortcut, *sharesShortcutWith;
     NSDictionary *(*defaultShortcut)(void);
+    const DPSetting *settings;
     BOOL (*hides)(NSView *view);
     void (*install)(void);  // Runs at launch whether or not the patch is on.
     void (*apply)(DPPatch *patch);  // Without it, `progress` eases toward `on` and every `relayout` runs each frame.
@@ -45,8 +61,39 @@ static inline void DPWithoutAnimation(void (^work)(void)) {
     [CATransaction commit];
 }
 
+static inline NSString *DPSettingsDomain(void) {
+    const char *domain = getenv("DIATWEAKS_DOMAIN");
+    return domain && *domain ? @(domain) : @"com.diapatches";
+}
+
+// Follows DIATWEAKS_DOMAIN as it changes, so a test can point every tweak's saved switches at a scratch domain.
+static inline NSUserDefaults *DPSettingsDefaults(void) {
+    static os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
+    static NSUserDefaults *defaults;
+    static NSString *domain;
+    NSString *wanted = DPSettingsDomain();
+    os_unfair_lock_lock(&lock);
+    if (![domain isEqualToString:wanted]) {
+        domain = wanted;
+        defaults = [[NSUserDefaults alloc] initWithSuiteName:wanted];
+    }
+    NSUserDefaults *current = defaults;
+    os_unfair_lock_unlock(&lock);
+    return current;
+}
+
+static inline void DPSyncMonitor(__strong id *monitor, BOOL on, NSEventMask mask, NSEvent *(^handler)(NSEvent *event)) {
+    if (on == (*monitor != nil)) return;
+    if (on) {
+        *monitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:handler];
+        return;
+    }
+    [NSEvent removeMonitor:*monitor];
+    *monitor = nil;
+}
+
 // A local tweak records the DPPatch layout it was built against; bump this whenever DPPatch changes so stale ones are refused.
-#define DP_LOCAL_ABI 1
+#define DP_LOCAL_ABI 2
 
 #define DP_PATCH(name)                                                                                                      \
     DPPatch name;                                                                                                           \
@@ -62,8 +109,6 @@ DPPatch *DPRequired(DPPatch *patch);
 int DPDeclaredOrder(DPPatch *patch);  // Where the tweak sits in the source, before Settings order.
 void DPSetPatch(DPPatch *patch, BOOL on, BOOL save);
 void DPApplySavedSettings(void);
-// DiaTweaks' settings domain: com.diapatches, or DIATWEAKS_DOMAIN for a test copy of Dia.
-NSString *DPSettingsDomain(void);
 BOOL DPEffectiveOn(DPPatch *patch);
 BOOL DPAnimating(void);
 BOOL DPSavedOn(DPPatch *patch);
@@ -74,6 +119,8 @@ void DPWatchSavedSettings(void);
 void DPInstallPatches(void);
 void DPInstallMenuGuard(void);
 BOOL DPWriteManifest(NSString *path);
+NSArray<NSString *> *DPChoiceValues(DPPatch *patch);
+NSNumber *DPCleanNumber(double value);
 // Local tweaks are ordinary DPPatch entries; a side table tags them so DPPatch, and a prebuilt dylib's ABI stamp, stay valid.
 BOOL DPIsLocalPatch(DPPatch *patch);
 NSString *DPLocalProblem(DPPatch *patch);
@@ -114,6 +161,7 @@ void DPPopOriginalIMP(DPHookFrame *frame);
 
 NSView *DPFindView(NSView *root, BOOL (^match)(NSView *view));
 NSArray<NSView *> *DPFindViews(const char *className);
+NSArray<NSView *> *DPFindAllViews(const char *className);  // Also those in windows that aren't showing.
 NSString *DPTabLayout(void);
 NSView *DPSubview(NSView *parent, const char *className);
 BOOL DPIsKind(id object, const char *className);
@@ -134,6 +182,14 @@ static inline BOOL DPSetValueForKey(id object, NSString *key, id value) {
     @try { [object setValue:value forKey:key]; return YES; } @catch (NSException *exception) { return NO; }
 }
 NSMenu *DPTabContextMenu(NSView *tab);
+id DPTabState(NSView *tab);
+BOOL DPStateSelected(id state);
+NSView *DPFindTabIn(NSWindow *window, BOOL (^match)(NSView *tab));
+NSString *DPPageID(id page);
+NSView *DPTabShowing(NSWindow *window, NSString *pageID, BOOL anyWindow);
+BOOL DPPageInPinnedRow(NSWindow *window, id page);
+BOOL DPIsWebURL(NSURL *url);
+id DPActionStayingInTab(id action);  // A navigation action as Dia would decide it for a click that stays in the tab.
 NSArray<NSString *> *DPUUIDsIn(NSString *text);
 NSWindowController *DPOpenTabSwitcher(void);
 

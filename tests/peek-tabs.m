@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek/Peek.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import <Carbon/Carbon.h>
@@ -36,8 +36,11 @@ static NSMapTable<NSWindow *, id> *gScriptWindows;
 @interface DPFakeTabState : NSObject
 @property (nonatomic, copy) NSString *selectionStyle, *contentID;
 @end
+static int gDescriptions, gMenuBuilds;
+
 @implementation DPFakeTabState
 - (NSString *)description {
+    gDescriptions++;
     return self.contentID ? [NSString stringWithFormat:@"state(contentIDs: [%@], selectionStyle: %@)", self.contentID, self.selectionStyle ?: @"nil"]
                           : [NSString stringWithFormat:@"state(selectionStyle: %@)", self.selectionStyle ?: @"nil"];
 }
@@ -60,9 +63,16 @@ static NSMapTable<NSWindow *, id> *gScriptWindows;
 
 @interface _TtC5TabUI7TabView : NSView
 @property (nonatomic, strong) DPFakeTabVM *viewModel;
+@property (nonatomic) BOOL pinnedRow;
 @end
 @implementation _TtC5TabUI7TabView
 - (id)safeSwiftValueForKey:(NSString *)key { return [key isEqual:@"viewModel"] ? self.viewModel : nil; }
+- (NSMenu *)menuForEvent:(NSEvent *)event {
+    gMenuBuilds++;
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Tab"];
+    [menu addItemWithTitle:self.pinnedRow ? @"Unpin" : @"Pin" action:@selector(copy:) keyEquivalent:@""];
+    return menu;
+}
 @end
 
 @interface _TtC5TabUI15TabDockItemView : NSView
@@ -108,6 +118,13 @@ static NSMapTable<NSWindow *, id> *gScriptWindows;
 - (id)load:(NSURL *)url initiatorOrigin:(NSURL *)origin { self.url = url; return nil; }
 - (void)resetZoomAndScaleFactors { self.zoomFactor = 1; gZoomCalls++; }
 - (void)setZoomFactor:(float)z { _zoomFactor = z; gZoomCalls++; }
+@end
+
+@interface DPIdentifiedPage : ArcWebContents
+@property (nonatomic, copy) NSString *identifier;
+@end
+@implementation DPIdentifiedPage
+- (id)safeSwiftValueForKey:(NSString *)key { return [key isEqual:@"identifier"] ? self.identifier : nil; }
 @end
 
 @interface ArcWebContentsConfiguration : NSObject
@@ -185,26 +202,25 @@ BOOL DPPeekCopyURL(DPPeekCard *peek, NSEvent *event) { return NO; }
 BOOL DPPeekIsShortcut(NSEvent *event, NSMenuItem *item) { return NO; }
 float DPZoomStep(float now, int direction) { return direction > 0 ? now + 0.1f : now - 0.1f; }
 BOOL DPEventIsKey(NSEvent *event, NSString *key) { return [event.charactersIgnoringModifiers caseInsensitiveCompare:key] == NSOrderedSame; }
-BOOL DPPeekIsWeb(NSURL *url) { return [url.scheme isEqual:@"https"] || [url.scheme isEqual:@"http"]; }
 void DPPeekOpenDragged(NSURL *url, NSPoint origin) {}
 void DPPeekHideDragZone(void) {}
 NSURL *DPAddressURL(NSString *typed) { return [NSURL URLWithString:typed]; }
 NSButton *DPMakeBarButton(NSString *symbol, NSString *label, NSString *key, void (^action)(void)) { return [NSButton new]; }
 
-#import "Patches/Peek/Controls.m"
-#import "Patches/Peek/Address.m"
-#import "Patches/Peek/Find.m"
-#import "Patches/Peek/Tab.m"
-#import "Patches/Peek/Selection.m"
-#import "Patches/Peek/Motion.m"
-#import "Patches/Peek/Keys.m"
-#import "Patches/Peek/Visibility.m"
-#import "Patches/Peek/Chat.m"
-#import "Patches/Peek/ChatContext.m"
-#import "Patches/Peek/Card.m"
-#import "Patches/Peek/Pages.m"
-#import "Patches/Peek/Handoff.m"
-#import "Patches/Peek/Zoom.m"
+#import "Peek/Controls.m"
+#import "Peek/Address.m"
+#import "Peek/Find.m"
+#import "Peek/Tab.m"
+#import "Peek/Selection.m"
+#import "Peek/Motion.m"
+#import "Peek/Keys.m"
+#import "Peek/Visibility.m"
+#import "Peek/Chat.m"
+#import "Peek/ChatContext.m"
+#import "Peek/Card.m"
+#import "Peek/Pages.m"
+#import "Peek/Handoff.m"
+#import "Peek/Zoom.m"
 
 static int failures;
 static void Check(BOOL ok, const char *message) {
@@ -574,6 +590,28 @@ int main(void) {
         [sX closeWithForegroundCommitTiming:0];
         [delegate webContents:sX finalizeDiscardRequest:YES];
         Check(DPPeekSyncTimer == nil && DPPeekAllCards(nil).count == 0, "hooks are complete no-ops when Peek is off");
+
+        DPPeekTabWindow *pinWindow = [[DPPeekTabWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
+            styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+        pinWindow.releasedWhenClosed = NO;
+        NSString *pinID = @"22222222-2222-2222-2222-222222222222";
+        MakeTabRow(pinWindow.contentView, @"33333333-3333-3333-3333-333333333333", @"none");
+        _TtC5TabUI7TabView *pinRow = MakeTabRow(pinWindow.contentView, pinID, @"selected");
+        pinRow.pinnedRow = YES;
+        DPIdentifiedPage *pinPage = [DPIdentifiedPage new], *strayPage = [DPIdentifiedPage new];
+        pinPage.identifier = pinID;
+        strayPage.identifier = @"44444444-4444-4444-4444-444444444444";
+        NSUInteger tabs = DPFindViews(DPDiaTabView).count + DPFindViews(DPDiaPinnedTab).count;
+        gMenuBuilds = gDescriptions = 0;
+        BOOL pinned = DPPageInPinnedRow(pinWindow, pinPage) && DPPageInPinnedRow(pinWindow, pinPage) && DPPageInPinnedRow(pinWindow, pinPage);
+        Check(pinned && gMenuBuilds == 1, "the hooks asking about one click build Dia's tab menu once");
+        gMenuBuilds = gDescriptions = 0;
+        Check(DPPageInPinnedRow(pinWindow, strayPage) && gMenuBuilds == 1 && gDescriptions > 0 && (NSUInteger)gDescriptions <= tabs,
+              "a page no tab names falls back to the selected tab, describing each tab once");
+        pinRow.pinnedRow = NO;
+        [NSThread sleepForTimeInterval:0.6];
+        Check(!DPPageInPinnedRow(pinWindow, pinPage) && gMenuBuilds == 2, "a remembered answer expires, so unpinning is seen");
+        [pinWindow close];
 
         [window close];
         [window2 close];

@@ -63,6 +63,7 @@ body:
         - Switch Profiles with ⌘1–9
         - Hide Pinned Tabs
         - Hide Profile Name
+        - Delete Profile from Sidebar
         - Tidy Tabs
         - Unload Tabs
         - Clean Tab Titles

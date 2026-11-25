@@ -1,6 +1,24 @@
 #import "StdPatch/StdPatch.h"
 #import <os/log.h>
+#import <pthread.h>
 #import <stdatomic.h>
+
+// Swift registers "Module.Class" as "_TtC<len>Module<len>Class", so a dotted lookup name never equals the class's own name.
+static BOOL DPSameClassName(const char *actual, const char *name) {
+    if (!strcmp(actual, name)) return YES;
+    if (strncmp(actual, "_TtC", 4)) return NO;
+    actual += 4;
+    for (int part = 0; part < 2; part++) {
+        if (*actual < '1' || *actual > '9') return NO;
+        size_t length = 0;
+        while (*actual >= '0' && *actual <= '9' && length <= 256) length = length * 10 + (size_t)(*actual++ - '0');
+        if (length > 256) return NO;
+        for (; length; length--, actual++, name++)
+            if (!*actual || *actual != *name) return NO;
+        if (part == 0 ? *name++ != '.' : *name) return NO;
+    }
+    return !*actual;
+}
 
 // Hot hooks look Dia's classes up by name on every call; the slot is only a hint, checked against the class's own name.
 static Class DPClassNamed(const char *name) {
@@ -9,7 +27,7 @@ static Class DPClassNamed(const char *name) {
     for (const unsigned char *p = (const unsigned char *)name; *p; p++) hash = (hash ^ *p) * 16777619u;
     _Atomic(void *) *slot = &cache[hash & 255];
     Class cls = (__bridge Class)atomic_load_explicit(slot, memory_order_relaxed);
-    if (cls && !strcmp(class_getName(cls), name)) return cls;
+    if (cls && DPSameClassName(class_getName(cls), name)) return cls;
     cls = objc_getClass(name);
     if (cls) atomic_store_explicit(slot, (__bridge void *)cls, memory_order_relaxed);
     return cls;
@@ -29,14 +47,18 @@ static void DPCollectViews(NSView *view, Class cls, NSMutableArray<NSView *> *vi
     for (NSView *sub in view.subviews) DPCollectViews(sub, cls, views);
 }
 
-NSArray<NSView *> *DPFindViews(const char *className) {
+static NSArray<NSView *> *DPViewsOfClass(const char *className, BOOL hiddenToo) {
     Class cls = className ? DPClassNamed(className) : Nil;
     if (!cls) return @[];
     NSMutableArray<NSView *> *views = [NSMutableArray new];
     for (NSWindow *window in NSApp.windows)
-        if (window.isVisible) DPCollectViews(window.contentView, cls, views);
+        if (hiddenToo || window.isVisible) DPCollectViews(window.contentView, cls, views);
     return views;
 }
+
+NSArray<NSView *> *DPFindViews(const char *className) { return DPViewsOfClass(className, NO); }
+
+NSArray<NSView *> *DPFindAllViews(const char *className) { return DPViewsOfClass(className, YES); }
 
 NSString *DPTabLayout(void) {
     Class cls = DPClassNamed(DPDiaSidebarFooter);
@@ -73,8 +95,23 @@ BOOL DPIsChatButton(NSView *view) {
         || DPFindView(view, ^BOOL(NSView *sub) { return DPHasLabel(sub, @"chat fill"); }) != nil;
 }
 
+static __unsafe_unretained NSView *DPLabelView;
+static NSString *DPLabel;
+static BOOL DPLabelRead;
+
+void DPShareLabel(NSView *view) {
+    DPLabelView = pthread_main_np() ? view : nil;
+    DPLabel = nil;
+    DPLabelRead = NO;
+}
+
 BOOL DPHasLabel(NSView *view, NSString *accessibilityLabel) {
-    return [view.accessibilityLabel isEqualToString:accessibilityLabel];
+    if (!view || view != DPLabelView || !pthread_main_np()) return [view.accessibilityLabel isEqualToString:accessibilityLabel];
+    if (!DPLabelRead) {
+        DPLabel = view.accessibilityLabel;
+        DPLabelRead = YES;
+    }
+    return [DPLabel isEqualToString:accessibilityLabel];
 }
 
 void DPRelayoutViews(NSHashTable<NSView *> *views) {
@@ -127,6 +164,84 @@ NSMenu *DPTabContextMenu(NSView *tab) {
     NSEvent *click = [NSEvent mouseEventWithType:NSEventTypeRightMouseDown location:point modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
                                     windowNumber:tab.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
     return [tab menuForEvent:click];
+}
+
+id DPTabState(NSView *tab) {
+    return DPSwiftValue(DPSwiftValue(DPSwiftValue(tab, @"viewModel"), @"stateSubject"), @"currentValue");
+}
+
+// selectionStyle is nil on an unselected pinned tab, "none" on other unselected tabs, above/below beside the selection.
+BOOL DPStateSelected(id state) {
+    NSString *style = [[DPSwiftValue(state, @"selectionStyle") description] lowercaseString];
+    return style && ![style isEqualToString:@"nil"] && ![style containsString:@"none"] && ![style containsString:@"above"] && ![style containsString:@"below"];
+}
+
+NSView *DPFindTabIn(NSWindow *window, BOOL (^match)(NSView *tab)) {
+    const char *kinds[2] = {DPDiaTabView, DPDiaPinnedTab};
+    for (int i = 0; i < 2; i++)
+        for (NSView *tab in DPFindViews(kinds[i]))
+            if ((!window || tab.window == window) && !tab.isHiddenOrHasHiddenAncestor && match(tab)) return tab;
+    return nil;
+}
+
+NSString *DPPageID(id page) {
+    static NSString *const keys[] = {@"identifier", @"id", @"contentID", @"contentId", @"uuid"};
+    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++) {
+        NSString *value = [DPSwiftValue(page, keys[i]) description];
+        if (value.length >= 32 && [value containsString:@"-"]) return value;
+    }
+    return nil;
+}
+
+NSView *DPTabShowing(NSWindow *window, NSString *pageID, BOOL anyWindow) {
+    __block NSView *selected = nil;
+    NSView *exact = DPFindTabIn(anyWindow ? nil : window, ^BOOL(NSView *tab) {
+        id state = DPTabState(tab);
+        if (pageID && [[state description] containsString:pageID]) return YES;
+        if (!selected && (!window || tab.window == window) && DPStateSelected(state)) selected = tab;
+        return NO;
+    });
+    return exact ?: selected;
+}
+
+static char DPPinnedRowKey;
+
+// Icon tiles' links already open new tabs; a pinned row's don't, and only its context menu says it is pinned.
+// Several hooks ask about the same click and the menu is costly to build, so an answer holds for half a second.
+BOOL DPPageInPinnedRow(NSWindow *window, id page) {
+    NSArray *memo = page ? DPGet(page, &DPPinnedRowKey) : nil;
+    CFTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (memo && [memo[2] nonretainedObjectValue] == window && now - [memo[1] doubleValue] < 0.5) return [memo[0] boolValue];
+    NSView *tab = DPTabShowing(window, DPPageID(page), YES);
+    NSMenuItem *unpin = tab && !DPIsKind(tab, DPDiaPinnedTab) ? [DPTabContextMenu(tab) itemWithTitle:@"Unpin"] : nil;
+    BOOL pinned = unpin && !unpin.hidden && unpin.enabled;
+    if (page) DPSet(page, &DPPinnedRowKey, @[ @(pinned), @(now), [NSValue valueWithNonretainedObject:window] ]);
+    return pinned;
+}
+
+BOOL DPIsWebURL(NSURL *url) {
+    if (![url isKindOfClass:NSURL.class]) return NO;
+    NSString *scheme = url.scheme;
+    return [scheme caseInsensitiveCompare:@"http"] == NSOrderedSame || [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame;
+}
+
+@interface DPStayingAction : NSProxy
+@property (nonatomic, strong) id action;
+@end
+
+@implementation DPStayingAction
+- (NSInteger)navigationDisposition { return DPCurrentTab; }
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)selector { return [self.action methodSignatureForSelector:selector]; }
+- (void)forwardInvocation:(NSInvocation *)invocation { [invocation invokeWithTarget:self.action]; }
+- (BOOL)respondsToSelector:(SEL)selector { return selector == @selector(navigationDisposition) || [self.action respondsToSelector:selector]; }
+- (BOOL)conformsToProtocol:(Protocol *)protocol { return [self.action conformsToProtocol:protocol]; }
+- (BOOL)isKindOfClass:(Class)cls { return [self.action isKindOfClass:cls]; }
+@end
+
+id DPActionStayingInTab(id action) {
+    DPStayingAction *staying = [DPStayingAction alloc];
+    staying.action = action;
+    return staying;
 }
 
 NSArray<NSString *> *DPUUIDsIn(NSString *text) {

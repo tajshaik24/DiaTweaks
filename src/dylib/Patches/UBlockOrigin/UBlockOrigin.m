@@ -123,7 +123,7 @@ DP_PATCH(DPUBlockOrigin) {
     .key = @"uBlockOrigin",
     .order = 106,
     .title = @"uBlock Origin",
-    .detail = @"Block ads and trackers with the full uBlock Origin, which Dia’s Chromium no longer allows. DiaTweaks downloads a checked release, then reopens Chromium’s Manifest V2 check in memory each time Dia starts. Turning it on or off takes a relaunch. Experimental.",
+    .detail = @"Block ads and trackers with the full uBlock Origin, which Dia’s Chromium no longer allows. DiaTweaks downloads a checked release, then reopens Chromium’s Manifest V2 check in memory each time Dia starts. Turning it on or off takes a relaunch.",
     .symbol = @"shield.lefthalf.filled shield.fill",
     .tint = @"systemRedColor",
     .section = @"Privacy",

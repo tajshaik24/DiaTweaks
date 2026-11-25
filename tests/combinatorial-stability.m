@@ -21,7 +21,7 @@
 #import "Patches/CommandBar/HideTab.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/CommandBar/AutoPip.h"
-#import "Patches/Peek/Peek.h"
+#import "Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/UnloadTab/Pages.h"
 #import "Patches/UnloadTab/Recent.h"
@@ -117,7 +117,6 @@ static NSMutableArray<NSURL *> *gLittleDiaOpenedLinks;
 BOOL DPLittleDiaReady(void) { return YES; }
 void DPOpenLinkInLittleDia(NSURL *url) { if (url) [gLittleDiaOpenedLinks addObject:url]; }
 BOOL DPIsLittleDiaWindow(NSWindow *window) { return window && [gLittleDiaWindows containsObject:window]; }
-BOOL DPLittleDiaTakesTabLink(id page, NSURL *url, BOOL leavesPinned) { return NO; }
 
 // CommandBar spare/swap stubs (CommandBar.m + AutoPip.m + HideTabLayout.m + HideTabParked.m + Tabs.m are real)
 static BOOL gHideTabEnabled = YES;
@@ -212,9 +211,9 @@ void DPPeekHideDragZone(void) {}
 CATransform3D DPPeekScaled(NSView *view, CGFloat scale) { return CATransform3DMakeScale(scale, scale, 1); }
 NSString *DPDomainKey(NSString *address) { return address ? [NSURL URLWithString:address].host.lowercaseString : nil; }
 NSString *DPRegistrableDomain(NSString *host) { return host; }
-NSString *DPPeekLinkKey(NSString *address) { return address; }
 double DPPeekDarkness(void) { return 0.35; }
 double DPPeekResponse(void) { return 0.3; }
+BOOL DPSamplesProgressColors;
 BOOL DPPeekGenie(void) { return NO; }
 BOOL DPPeekShowsToolbar(void) { return YES; }
 NSArray<NSView *> *DPPeekSettingsRows(void) { return @[]; }
@@ -229,6 +228,10 @@ static NSArray<NSString *> *gLastConfigArgv;
 static int gLastConfigArgc;
 static int gPopupCalls, gPipRequests;
 static NSMutableArray<NSEvent * (^)(NSEvent *)> *gKeyMonitors;
+
+static const NSPoint DPCombOffscreenPointer = {-100000, -100000};
+static NSPoint DPEvent_mouseLocation(id self, SEL _cmd) { return DPCombOffscreenPointer; }
+static NSUInteger DPEvent_pressedMouseButtons(id self, SEL _cmd) { return 0; }
 
 static id DPEvent_addLocalMonitor(id self, SEL _cmd, NSEventMask mask, NSEvent * (^handler)(NSEvent *)) {
     id token = DPCallOriginal(DPEvent_addLocalMonitor, self, mask, handler);
@@ -337,11 +340,10 @@ static NSEvent *MakeRightClick(NSWindow *window) {
 - (void)_updateWindowCornerMask {}
 - (BOOL)isVisible { return self.fakeVisible; }
 - (BOOL)isKeyWindow { return self.fakeKey; }
-// DPPointerOver reads the real cursor; pin it off-window so the result doesn't depend on where the mouse is.
-- (NSPoint)mouseLocationOutsideOfEventStream { return NSMakePoint(-10000, -10000); }
 - (NSWindow *)attachedSheet { return self.fakeSheet; }
 - (NSButton *)standardWindowButton:(NSWindowButton)b { return b == NSWindowCloseButton ? self.fakeCloseButton : [super standardWindowButton:b]; }
 - (NSResponder *)firstResponder { return self.mockFirstResponder ?: [super firstResponder]; }
+- (NSPoint)mouseLocationOutsideOfEventStream { return DPCombOffscreenPointer; }
 - (BOOL)makeFirstResponder:(NSResponder *)responder { self.mockFirstResponder = responder; return YES; }
 - (void)performClose:(id)sender { self.closeCalled = YES; }
 - (id)safeSwiftValueForKey:(NSString *)key { return [key isEqualToString:@"viewModel"] ? self.viewModel : nil; }
@@ -1747,6 +1749,7 @@ static void TestPermutationAndPauseStress(void) {
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         [NSApplication sharedApplication];
         DPArmTestWatchdog(120);
         DPTesting = YES;
@@ -1761,11 +1764,15 @@ int main(void) {
         [NSFileManager.defaultManager createDirectoryAtPath:scratchDir withIntermediateDirectories:YES attributes:nil error:nil];
         NSString *fakeDylib = [scratchDir stringByAppendingPathComponent:@"DiaPatches.dylib"];
         DPTestDylibPath = fakeDylib.fileSystemRepresentation;
+        setenv("DIAPATCH_HOME", [scratchDir stringByAppendingPathComponent:@"home"].fileSystemRepresentation, 1);
 
         // Capture all installed local key monitors so overlay priority tests exercise the real monitor chain.
         Class eventMeta = object_getClass(NSEvent.class);
         DPHookClass(eventMeta, @selector(addLocalMonitorForEventsMatchingMask:handler:), (IMP)DPEvent_addLocalMonitor);
         DPHookClass(eventMeta, @selector(removeMonitor:), (IMP)DPEvent_removeMonitor);
+        // Keep the host's real pointer and held mouse buttons out of every hover check.
+        DPHookClass(eventMeta, @selector(mouseLocation), (IMP)DPEvent_mouseLocation);
+        DPHookClass(eventMeta, @selector(pressedMouseButtons), (IMP)DPEvent_pressedMouseButtons);
 
         // Stub NSMenu popup presentation before patches hook it, so popup tests never block headless runs.
         Class menuMeta = object_getClass(NSMenu.class);

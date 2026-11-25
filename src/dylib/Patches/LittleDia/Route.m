@@ -26,11 +26,6 @@ static NSRect DPLittleDiaFrame(void) {
     return NSMakeRect(round(NSMidX(visible) - size.width / 2), round(NSMidY(visible) - size.height / 2), size.width, size.height);
 }
 
-static BOOL DPIsWebURL(NSURL *url) {
-    NSString *scheme = url.scheme;
-    return scheme && ([scheme caseInsensitiveCompare:@"http"] == NSOrderedSame || [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame);
-}
-
 static NSURL *DPWebURLFromString(NSString *string) {
     NSString *trimmed = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (!trimmed.length) return nil;
@@ -62,9 +57,11 @@ static NSArray<NSURL *> *DPLittleDiaLinks(NSAppleEventDescriptor *event) {
 
 // The worker drops requests after `until`, set before the link falls back to a tab, so no second copy opens.
 static BOOL DPOpenFramed(NSURL *url, NSRect frame, NSDictionary *noted, void (^missed)(void), void (^claimed)(NSWindow *window)) {
+    NSString *address = url.absoluteString;
+    if (!address) return NO;
     CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame) - NSMaxY(frame);
     long long until = llround((NSDate.date.timeIntervalSince1970 + DPLittleDiaWait - 0.5) * 1000);
-    NSDictionary *request = @{@"action" : @"open", @"url" : url.absoluteString,
+    NSDictionary *request = @{@"action" : @"open", @"url" : address,
                               @"left" : @(llround(NSMinX(frame))), @"top" : @(llround(top)),
                               @"width" : @(llround(NSWidth(frame))), @"height" : @(llround(NSHeight(frame))),
                               @"until" : @(until)};

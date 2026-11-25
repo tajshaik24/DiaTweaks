@@ -1,5 +1,5 @@
 #import "StdPatch/StdPatch.h"
-#import "Patches/Peek/Peek.h"
+#import "Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import "Patches/CompactTabRows/CompactTabRows.h"
@@ -13,7 +13,8 @@ static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
 DPPatch DPPeek = { .on = YES }, DPLittleDia = { .on = YES }, DPHideToolbar = { .on = NO },
-        DPRevealToolbarOnHover = { .on = YES }, DPShowLoadingProgress = { .on = NO };
+        DPRevealToolbarOnHover = { .on = YES }, DPShowLoadingProgress = { .on = NO }, DPLittleDiaFollowRules = { .on = NO };
+BOOL DPLittleDiaReady(void) { return YES; }
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
 
 static NSMutableArray<NSEvent *(^)(NSEvent *)> *gMouseMonitors;
@@ -178,8 +179,8 @@ static NSArray<NSWindow *> *gTestWindows;
 static NSArray<NSWindow *> *DPApp_windows(NSApplication *self, SEL _cmd) { return gTestWindows ?: @[]; }
 static NSArray<NSWindow *> *DPApp_orderedWindows(NSApplication *self, SEL _cmd) { return gTestWindows ?: @[]; }
 
-#import "Patches/Peek/Toolbar.m"
-#import "Patches/Peek/ToolbarRules.m"
+#import "Peek/Toolbar.m"
+#import "Peek/ToolbarRules.m"
 #import "Patches/LittleDia/Over.m"
 #import "Patches/LittleDia/Stack.m"
 
@@ -232,7 +233,13 @@ static void TestPeekToolbarZOrderAndBarZoneDealloc(void) {
         DPPeekAddToolbar(tempPeek);
         weakZone = (DPPeekBarZone *)tempPeek.toolbarZone;
         [win.contentView addSubview:tempPeek];
-        CHECK(weakZone.watch.valid && weakZone.patches != nil, "DPPeekBarZone starts watch timer and notification observer");
+        CHECK(!weakZone.watch && weakZone.patches != nil, "DPPeekBarZone polls nothing while Hide Toolbar is off, but listens for settings");
+        DPHideToolbar.on = YES;
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        CHECK(weakZone.watch.valid, "DPPeekBarZone starts watching once Hide Toolbar turns on");
+        DPHideToolbar.on = NO;
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        CHECK(!weakZone.watch, "DPPeekBarZone stops watching once Hide Toolbar turns off");
         // Remove directly without letting timers fire on a freed object.
         [tempPeek removeFromSuperview];
     }

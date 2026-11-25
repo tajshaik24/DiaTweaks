@@ -4,8 +4,6 @@ extern DPPatch DPPinTabShortcut;
 
 static NSDictionary *DPDefaultPinShortcut(void) { return @{ @"keyCode" : @2, @"modifiers" : @(NSEventModifierFlagCommand), @"key" : @"D" }; }
 
-static id DPTabState(NSView *tab) { return DPSwiftValue(DPSwiftValue(DPSwiftValue(tab, @"viewModel"), @"stateSubject"), @"currentValue"); }
-
 static BOOL DPTabSelected(NSView *tab) {
     NSString *style = [[DPSwiftValue(DPTabState(tab), @"selectionStyle") description] lowercaseString];
     return style && ![style containsString:@"none"] && ![style containsString:@"above"] && ![style containsString:@"below"];
@@ -38,8 +36,9 @@ static void DPRunItem(NSMenuItem *item) { [item.menu performActionForItemAtIndex
 
 static NSURL *DPTabURL(NSView *tab) {
     NSDictionary *views = DPSwiftValue(tab, @"contentViews");
-    if (views.count != 1) return nil;
-    return DPSwiftValue(DPSwiftValue(DPSwiftValue(views.allValues.firstObject, @"viewModel"), @"delegate"), @"webContentURL");
+    if (![views isKindOfClass:NSDictionary.class] || views.count != 1) return nil;
+    NSURL *url = DPSwiftValue(DPSwiftValue(DPSwiftValue(views.allValues.firstObject, @"viewModel"), @"delegate"), @"webContentURL");
+    return [url isKindOfClass:NSURL.class] ? url : nil;
 }
 
 static NSView *DPSelectedTab(NSWindow *window) {

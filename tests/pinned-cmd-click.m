@@ -1,13 +1,11 @@
 #import <AppKit/AppKit.h>
 #import <objc/message.h>
 #import "StdPatch/StdPatch.h"
-#import "Patches/Peek/Peek.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 
 extern DPPatch DPPinnedCmdClick;
 
 static int gOriginalCalls;
-static id gPinnedSource;
 static NSEventModifierFlags gModifiers;
 static NSUInteger gPressedButtons;
 static NSEvent *gCurrentEvent;
@@ -18,18 +16,25 @@ static NSWindow *gKeyWindow;
 static NSWindow *DPApp_keyWindow(NSApplication *self, SEL _cmd) { return gKeyWindow; }
 static NSEvent *DPApp_currentEvent(NSApplication *self, SEL _cmd) { return gCurrentEvent; }
 
-BOOL DPPeekIsWeb(NSURL *url) {
-    NSString *scheme = url.scheme;
-    return [scheme caseInsensitiveCompare:@"http"] == NSOrderedSame || [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame;
-}
-BOOL DPPeekInPinnedRow(NSWindow *window, id page) { return page == gPinnedSource; }
+static NSWindow *gWindow, *gOtherWindow;
+static NSMapTable *gOwners;
+id DPBrowserOfContents(id contents) { return contents; }
+NSWindow *DPBrowserWindow(id browser) { return [gOwners objectForKey:browser] ?: gWindow; }
 NSString *DPText(id value) { return [value isKindOfClass:NSString.class] ? value : [value description]; }
 id DPMsg(id object, SEL sel) { return [object respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(object, sel) : nil; }
 BOOL DPMsgBool(id object, SEL sel) { return [object respondsToSelector:sel] && ((BOOL (*)(id, SEL))objc_msgSend)(object, sel); }
 void DPOnLaunch(void (^block)(void)) { block(); }
 
+@interface DPFakeTabState : NSObject
+@property (nonatomic, copy) NSString *text, *selectionStyle;
+@end
+@implementation DPFakeTabState
+- (NSString *)description { return self.text; }
+- (id)safeSwiftValueForKey:(NSString *)key { return [key isEqual:@"selectionStyle"] ? self.selectionStyle : nil; }
+@end
+
 @interface DPFakeState : NSObject
-@property (nonatomic, copy) NSString *currentValue;
+@property (nonatomic, strong) DPFakeTabState *currentValue;
 @end
 @implementation DPFakeState
 - (id)safeSwiftValueForKey:(NSString *)key { return [key isEqual:@"currentValue"] ? self.currentValue : nil; }
@@ -96,8 +101,7 @@ static void PumpFor(NSTimeInterval seconds) {
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
 
-static NSWindow *gWindow;
-static _TtC5TabUI7TabView *gSourceTab, *gNewTab;
+static _TtC5TabUI7TabView *gSourceTab, *gNewTab, *gRegularTab;
 static DPUnpinTarget *gSourceTarget, *gNewTarget;
 
 static DPFakePage *DPMakePage(NSString *identifier, NSString *url) {
@@ -107,16 +111,18 @@ static DPFakePage *DPMakePage(NSString *identifier, NSString *url) {
     return page;
 }
 
-// A tab row whose context menu offers Unpin, as a pinned row does.
-static void DPShowTabFor(_TtC5TabUI7TabView *tab, DPFakePage *page, DPUnpinTarget *target) {
+// A tab row whose context menu offers `item`, as a pinned row's offers Unpin.
+static void DPShowTabFor(_TtC5TabUI7TabView *tab, DPFakePage *page, NSString *item, DPUnpinTarget *target, BOOL selected) {
+    DPFakeTabState *tabState = [DPFakeTabState new];
+    tabState.text = [NSString stringWithFormat:@"TabState(contentIDs: [%@])", page.identifier];
+    tabState.selectionStyle = selected ? @"selected" : @"none";
     DPFakeState *state = [DPFakeState new];
-    state.currentValue = [NSString stringWithFormat:@"TabState(contentIDs: [%@])", page.identifier];
+    state.currentValue = tabState;
     DPFakeViewModel *model = [DPFakeViewModel new];
     model.stateSubject = state;
     tab.viewModel = model;
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Tab"];
-    NSMenuItem *item = [menu addItemWithTitle:@"Unpin" action:@selector(unpin:) keyEquivalent:@""];
-    item.target = target;
+    [menu addItemWithTitle:item action:@selector(unpin:) keyEquivalent:@""].target = target;
     tab.contextMenu = menu;
 }
 
@@ -138,8 +144,10 @@ int main(void) {
                                                        backing:NSBackingStoreBuffered defer:NO];
         gSourceTab = [[_TtC5TabUI7TabView alloc] initWithFrame:NSMakeRect(0, 0, 200, 30)];
         gNewTab = [[_TtC5TabUI7TabView alloc] initWithFrame:NSMakeRect(0, 40, 200, 30)];
+        gRegularTab = [[_TtC5TabUI7TabView alloc] initWithFrame:NSMakeRect(0, 80, 200, 30)];
         [gWindow.contentView addSubview:gSourceTab];
         [gWindow.contentView addSubview:gNewTab];
+        [gWindow.contentView addSubview:gRegularTab];
         gKeyWindow = gWindow;
         gSourceTarget = [DPUnpinTarget new];
         gNewTarget = [DPUnpinTarget new];
@@ -149,9 +157,10 @@ int main(void) {
 
         DPFakePage *pinned = DPMakePage(@"11111111-1111-1111-1111-111111111111", @"https://pinned.example/");
         DPFakePage *opened = DPMakePage(@"22222222-2222-2222-2222-222222222222", @"https://opened.example/");
-        gPinnedSource = pinned;
-        DPShowTabFor(gSourceTab, pinned, gSourceTarget);
-        DPShowTabFor(gNewTab, opened, gNewTarget);
+        DPFakePage *regular = DPMakePage(@"44444444-4444-4444-4444-444444444444", @"https://regular.example/");
+        DPShowTabFor(gSourceTab, pinned, @"Unpin", gSourceTarget, YES);
+        DPShowTabFor(gNewTab, opened, @"Unpin", gNewTarget, NO);
+        DPShowTabFor(gRegularTab, regular, @"Close Tab", nil, NO);
 
         gModifiers = NSEventModifierFlagCommand;
         DPClick(pinned, opened, DPBackgroundTab);
@@ -198,27 +207,38 @@ int main(void) {
         gCurrentEvent = nil;
 
         gNewTarget.unpins = 0;
-        gPinnedSource = nil;
         gModifiers = NSEventModifierFlagCommand;
-        DPClick(pinned, opened, DPBackgroundTab);
+        DPClick(regular, opened, DPBackgroundTab);
         PumpFor(0.1);
         CHECK(gNewTarget.unpins == 0, "an unpinned source tab is left alone");
 
         gNewTarget.unpins = 0;
-        gPinnedSource = pinned;
-        DPShowTabFor(gNewTab, opened, nil);
+        DPShowTabFor(gNewTab, opened, @"Unpin", nil, NO);
         gModifiers = NSEventModifierFlagCommand;
         DPClick(pinned, opened, DPBackgroundTab);
         PumpFor(1.2);
         CHECK(gNewTarget.unpins == 0, "a nil-target Unpin item is refused");
-        DPShowTabFor(gNewTab, opened, gNewTarget);
+        DPPinnedCmdClick.on = NO;
+        PumpFor(0.3);
+        DPPinnedCmdClick.on = YES;
+        DPShowTabFor(gNewTab, opened, @"Unpin", gNewTarget, NO);
+
+        gNewTarget.unpins = 0;
+        gOtherWindow = [[DPVisibleWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300) styleMask:NSWindowStyleMaskBorderless
+                                                           backing:NSBackingStoreBuffered defer:NO];
+        DPFakePage *stray = DPMakePage(@"33333333-3333-3333-3333-333333333333", @"https://stray.example/");
+        gOwners = [NSMapTable weakToWeakObjectsMapTable];
+        [gOwners setObject:gOtherWindow forKey:stray];
+        DPClick(stray, opened, DPBackgroundTab);
+        PumpFor(0.2);
+        CHECK(gNewTarget.unpins == 0, "a link from another window's unpinned tab ignores the key window's pinned selection");
 
         gNewTarget.unpins = 0;
         DPPinnedCmdClick.on = NO;
         DPClick(pinned, opened, DPBackgroundTab);
         PumpFor(0.1);
         CHECK(gNewTarget.unpins == 0, "the hook is a no-op when the tweak is off");
-        CHECK(gOriginalCalls == 9, "the original handler still runs when off");
+        CHECK(gOriginalCalls == 10, "the original handler still runs when off");
 
         if (failures) return 1;
         puts("PASS: Pinned Tabs unpins tabs opened by ⌘-click or middle-click from a pinned tab");
