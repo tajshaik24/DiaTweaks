@@ -2,8 +2,8 @@
 #import <CommonCrypto/CommonDigest.h>
 
 // The uBlock Origin release this installs, checked against its digest before it's used.
-static NSString *const kVersion = @"1.77.2";
-static NSString *const kSHA256 = @"636cfa6c640b29ab7251b765225d6c0f580bd9fe830d1319005ea7093cf4303c";
+static NSString *const kVersion = @"1.77.4";
+static NSString *const kSHA256 = @"fe5c6ed9c6edfaf0dce1cff875b2629f647be40b8ac571c1a5f8fece8d22e5c4";
 // Gives the unpacked extension a fixed ID (fhlpapgmjejklmhcgeafaeilmmhdcack), so its settings survive a reinstall.
 static NSString *const kKey =
     @"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2/FjCXA/1Iggq3f5NWAsmu05dDM7JToqKPeoxDIMQcUFvIXPi4Ni0atQOVoybNtwVOvZ06qEW/TeDFr1qCkbmrBHXXmPJM7X5bEZnwaQfv3KWi+"
