@@ -16,6 +16,7 @@ HEADERS_BIN := build/dp_headers.bin
 LOCAL_CORE := src/dylib/Local/Local.m src/dylib/Local/Catalog.m src/dylib/Local/Build.m src/dylib/Local/Extract.m src/dylib/Local/State.m
 
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null)
+DESCRIBE := $(shell git describe --tags --match 'v[0-9]*' 2>/dev/null)
 
 TWEAK_FILES := $(shell find tweaks -type f ! -name index.json ! -name README.md ! -name '.*' 2>/dev/null)
 
@@ -26,12 +27,12 @@ build/tweaks.stamp: build/diapatch $(HEADERS_BIN) scripts/build-tweaks $(TWEAK_F
 	@touch $@
 
 build/commit: FORCE | build
-	@echo '$(COMMIT)' | cmp -s - $@ || echo '$(COMMIT)' > $@
+	@echo '$(COMMIT) $(DESCRIBE)' | cmp -s - $@ || echo '$(COMMIT) $(DESCRIBE)' > $@
 
 FORCE:
 
 build/diapatch: $(wildcard src/diapatch/*.[hm]) build/commit | build
-	clang $(CFLAGS) -DDIATWEAKS_COMMIT='"$(COMMIT)"' -framework AppKit -framework CoreGraphics -framework Security -o $@ $(filter %.m,$^)
+	clang $(CFLAGS) -DDIATWEAKS_COMMIT='"$(COMMIT)"' -DDIATWEAKS_DESCRIBE='"$(DESCRIBE)"' -framework AppKit -framework CoreGraphics -framework Security -o $@ $(filter %.m,$^)
 
 build/DiaPatchesSwift.o: $(DYLIB_SWIFT) | build
 	swiftc $(SWIFTFLAGS) -emit-object -o $@ $^

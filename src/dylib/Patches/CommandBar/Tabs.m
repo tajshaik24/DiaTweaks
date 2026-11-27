@@ -77,3 +77,13 @@ void DPCloseTab(id tab) {
     DPMarkOwnClose();
     [tab performSelector:@selector(close:) withObject:nil];
 }
+
+// A Google Meet meeting, not its home page: meet.google.com/abc-defg-hij and the like.
+BOOL DPIsMeetCall(id tab) {
+    NSURL *url = [NSURL URLWithString:[DPValueForKey(tab, @"URL") description] ?: @""];
+    if (![url.host.lowercaseString isEqualToString:@"meet.google.com"]) return NO;
+    NSString *path = url.path.lowercaseString;
+    return path.length > 1 && ![path hasPrefix:@"/landing"] && ![path hasPrefix:@"/new"];
+}
+
+BOOL DPOnMeetCall(NSWindow *window) { return DPIsMeetCall(DPValueForKey(DPScriptWindow(window), @"activeTab")); }

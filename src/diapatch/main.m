@@ -640,6 +640,22 @@ static NSString *sourceCommit(void) {
     return commit;
 }
 
+// What a source build is, from `git describe` at build time: "v1.2.0.4 (source build)" or "v1.2.0.4 + 3 (abc1234)".
+static NSString *sourceVersion(void) {
+    if (installedRelease()[@"tag"]) return nil;
+#ifdef DIATWEAKS_DESCRIBE
+    NSString *describe = env("DIAPATCH_DESCRIBE") ?: @DIATWEAKS_DESCRIBE;
+#else
+    NSString *describe = env("DIAPATCH_DESCRIBE");
+#endif
+    if (![describe hasPrefix:@"v"]) return nil;
+    NSRegularExpression *ahead = [NSRegularExpression regularExpressionWithPattern:@"^(.+)-([0-9]+)-g([0-9a-f]{7,})$" options:0 error:NULL];
+    NSTextCheckingResult *match = [ahead firstMatchInString:describe options:0 range:NSMakeRange(0, describe.length)];
+    if (!match) return [describe stringByAppendingString:@" (source build)"];
+    NSString *(^part)(NSUInteger) = ^NSString *(NSUInteger i) { return [describe substringWithRange:[match rangeAtIndex:i]]; };
+    return [NSString stringWithFormat:@"%@ + %@ (%@)", part(1), part(2), [part(3) substringToIndex:7]];
+}
+
 static NSString *sourceNotOlder(NSDictionary *latest) {
     NSString *commit = sourceCommit();
     if (!commit || ![latest[@"tag"] isKindOfClass:NSString.class]) return nil;
@@ -1012,7 +1028,7 @@ static BOOL checkUpdates(void) {
             @"error" : dia ? NSNull.null : problem,
         },
         @"tweaks" : @{
-            @"installed" : installedRelease()[@"tag"] ?: NSNull.null,
+            @"installed" : installedRelease()[@"tag"] ?: sourceVersion() ?: NSNull.null,
             @"latest" : tweaks[@"tag"] ?: NSNull.null,
             @"size" : tweaks[@"size"] ?: @0,
             @"releaseNotes" : tweaks[@"releaseNotes"] ?: NSNull.null,

@@ -53,7 +53,7 @@ static void DPMakeSpare(void) {
     id frontTab = DPValueForKey(scriptWindow, @"activeTab");
     NSString *front = DPTabID(frontTab);
     if (!front || [DPSplits(window) containsObject:front] || [DPBlanks(window) containsObject:front] || DPBlankPage(window)) return;
-    if (![DPValueForKey(frontTab, @"URL") description].length) return;
+    if (![DPValueForKey(frontTab, @"URL") description].length || DPIsMeetCall(frontTab)) return;
     if (!DPIsKind(window.firstResponder, "RenderWidgetHostViewCocoa")) return;
     NSMenuItem *item = DPMenuItemTitled(NSApp.mainMenu, @"New Tab");
     if (!item.action) return;

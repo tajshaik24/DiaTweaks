@@ -15,6 +15,8 @@ NSString *DPTabID(id tab);
 NSString *DPActiveTabID(NSWindow *window);
 NSString *DPActiveTabIDIn(id scriptWindow);
 void DPFocusTab(id tab);
+BOOL DPIsMeetCall(id tab);
+BOOL DPOnMeetCall(NSWindow *window);
 void DPCloseTab(id tab);
 void DPMarkOwnClose(void);
 BOOL DPTakeOwnClose(void);

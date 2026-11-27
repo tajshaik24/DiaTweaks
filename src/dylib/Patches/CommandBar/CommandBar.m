@@ -715,7 +715,8 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     BOOL hasPage = openedID && !overBlank && (DPHasURL(openedTab) || [kept containsObject:openedID]);
     BOOL returnsToPage = returnTab && [kept containsObject:returnID] && !DPHasURL(returnTab);
     // Keep Dia's own page for tabs with history or splits, since returning mid-switch to a split crashes Dia.
-    if (hasPage || returnsToPage || DPInSplit(page) || (!overBlank && [(NSSet *)DPGet(window, &DPSplitKey) containsObject:returnID])) {
+    // Never switch back to a Meet call behind the bar: Meet can reload when its page is moved mid-call.
+    if (hasPage || returnsToPage || DPIsMeetCall(returnTab) || DPInSplit(page) || (!overBlank && [(NSSet *)DPGet(window, &DPSplitKey) containsObject:returnID])) {
         if (openedID) [kept addObject:openedID];
         DPStopExpecting();
         return (void)DPSet(page, &DPOwnBarKey, @YES);
@@ -918,6 +919,8 @@ static NSEvent *DPCommandBarKey(NSEvent *event) {
     if (!(newTab || DPIsShortcut(event, @"Open Command Bar"))) return event;
     DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
     if (!newTab && !overlay && DPVisiblePeekTakesCommandL(window)) return event;
+    // On a Meet call, ⌘L and ⌘T go to Dia's own address bar and new tab: the bar's tab switching can reload the call.
+    if (!overlay && DPOnMeetCall(window)) return event;
     DPSet(window, &DPClosedAtKey, nil);
     DPNotMakingSpare();
     if (event.isARepeat) {
@@ -988,7 +991,7 @@ static void DPPopover_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPPopover_viewDidMoveToWindow, self);
     DPCommandBarOverlay *overlay = DPGet(self, &DPOverlayKey);
     if (overlay) return (void)DPDismissCommandBar(overlay);
-    if (!DPCommandBar.on || !self.window || DPToolbarShowing(self.window) || DPIsFloatingChat(self)) return;
+    if (!DPCommandBar.on || !self.window || DPToolbarShowing(self.window) || DPIsFloatingChat(self) || DPOnMeetCall(self.window)) return;
     overlay = DPLiftBar(self, DPValueForKey(DPScriptWindow(self.window), @"activeTab"));
     if (overlay) DPShowWhenBuilt(overlay);
 }
