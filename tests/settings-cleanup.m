@@ -192,9 +192,9 @@ int main(void) {
 
         [DPSettingsDefaults() setBool:YES forKey:@"showExperimentalTweaks"];
         DPLoadPatches();
-        // The fork adds three tweaks to upstream's 103: uBlock Origin (Privacy), and Hide Pinned Tabs in Tab Bar and
+        // The fork adds three tweaks to upstream's 107: uBlock Origin (Privacy), and Hide Pinned Tabs in Tab Bar and
         // Hide Profile Name (Horizontal Tabs).
-        expect(DPPatchCount == 106, @"the dylib lists 106 tweaks");
+        expect(DPPatchCount == 110, @"the dylib lists 110 tweaks");
         // Dia's classes aren't here, so every tweak would look unavailable; this test is about the layout.
         for (NSUInteger i = 0; i < DPPatchCount; i++) DPPatches[i]->unavailable = NO;
 
@@ -229,7 +229,7 @@ int main(void) {
         expectEqual(@(groups.count), @17, @"Overview has 15 sections, Paused and Experimental");
         NSUInteger rows = 0;
         for (NSUInteger i = 1; i < groups.count; i++) rows += DPRowsIn(groups[i]).count;
-        expectEqual(@(rows), @65, @"Overview has 64 tweak and folder rows and the experimental row");
+        expectEqual(@(rows), @66, @"Overview has 65 tweak and folder rows and the experimental row");
         for (NSString *folder in @[ @"Pinned Tabs", @"Hide AI Prompts & Buttons", @"Password Managers" ])
             expect(DPRowTitled(overview, folder) != nil, [NSString stringWithFormat:@"Overview has a %@ folder row", folder]);
         expect(DPRowTitled(overview, @"Allow 1Password") == nil, @"Allow 1Password has no row of its own");

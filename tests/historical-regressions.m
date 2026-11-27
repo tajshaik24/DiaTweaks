@@ -1,5 +1,5 @@
 #import "StdPatch/StdPatch.h"
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import "Patches/CompactTabRows/CompactTabRows.h"
@@ -179,8 +179,8 @@ static NSArray<NSWindow *> *gTestWindows;
 static NSArray<NSWindow *> *DPApp_windows(NSApplication *self, SEL _cmd) { return gTestWindows ?: @[]; }
 static NSArray<NSWindow *> *DPApp_orderedWindows(NSApplication *self, SEL _cmd) { return gTestWindows ?: @[]; }
 
-#import "Peek/Toolbar.m"
-#import "Peek/ToolbarRules.m"
+#import "Patches/Peek/Toolbar.m"
+#import "Patches/Peek/ToolbarRules.m"
 #import "Patches/LittleDia/Over.m"
 #import "Patches/LittleDia/Stack.m"
 
@@ -251,9 +251,14 @@ static void TestPeekToolbarZOrderAndBarZoneDealloc(void) {
 }
 
 static void TestLittleDiaOverAndStackRestore(void) {
-    DPLittleDia.on = YES;
+    NSUInteger monitorsBefore = gMouseMonitors.count;
+    DPLittleDia.on = NO;
     DPHideToolbar.on = NO;
     DPInstallLittleDiaOver();
+    CHECK(gMouseMonitors.count == monitorsBefore, "DPInstallLittleDiaOver installs no click monitor when Little Dia is off");
+    DPLittleDia.on = YES;
+    DPSyncLittleDiaOver();
+    CHECK(gMouseMonitors.count == monitorsBefore + 1, "DPSyncLittleDiaOver installs click monitor when Little Dia turns on");
     DPInstallLittleDiaStack();
 
     DPVisibleTestWindow *mainWin = [[DPVisibleTestWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 800, 600)
@@ -301,6 +306,8 @@ static void TestLittleDiaOverAndStackRestore(void) {
     DPLinkArrived();
     CHECK(!mainWin.visible && DPPutAwayWindows().count == 1, "DPLinkArrived puts away veiled main window");
     DPLittleDia.on = NO;
+    DPSyncLittleDiaOver();
+    CHECK(gMouseMonitors.count == monitorsBefore, "DPSyncLittleDiaOver removes click monitor when Little Dia turns off");
     DPRestoreLittleDiaStack();
     CHECK(mainWin.visible && fabs(mainWin.alphaValue - 1.0) < 0.01 && DPPutAwayWindows().count == 0,
           "DPRestoreLittleDiaStack unveils and brings back put-away windows on off/pause");

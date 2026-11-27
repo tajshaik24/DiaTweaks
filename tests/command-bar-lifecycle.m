@@ -4,6 +4,9 @@
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/HideNewTabLogo/HideNewTabLogo.m"
 #import "Patches/KeepWindowsActive/KeepWindowsActive.m"
+NSInteger DPSafeMode;
+BOOL DPPaused, DPPausedAtLaunch;
+NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
 
 static NSString *DPTestSuiteName(void) { return [NSString stringWithFormat:@"com.diapatches.command-bar-lifecycle.%d", getpid()]; }
 
@@ -122,6 +125,31 @@ NSView *DPGoButton(NSView *toolbar) { return nil; }
 - (void)setFrame:(NSRect)frame { self.frameWrites++; [super setFrame:frame]; }
 @end
 
+// Compact Command Bar keeps the panel 48 pt short of the height Dia sets, and DPTrim reports the difference.
+@interface DPTrimmedPanel : _TtC20AssistantPanelUIBase22AssistantPanelRootView
+@property BOOL compact;
+@property CGFloat trim, kept;
+@end
+@implementation DPTrimmedPanel
+- (void)setFrameSize:(NSSize)size {
+    if (self.compact && size.height != self.kept) {
+        self.trim = 48;
+        size.height -= self.trim;
+        self.kept = size.height;
+    } else if (!self.compact) self.trim = 0;
+    [super setFrameSize:size];
+}
+@end
+
+CGFloat DPTrim(NSView *container) { return [container isKindOfClass:DPTrimmedPanel.class] ? ((DPTrimmedPanel *)container).trim : 0; }
+
+@interface DPFakeSuggestions : NSView
+@property CGFloat rows;
+@end
+@implementation DPFakeSuggestions
+- (NSSize)intrinsicContentSize { return NSMakeSize(NSViewNoIntrinsicMetric, self.rows); }
+@end
+
 @interface _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView : NSView
 @end
 @implementation _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView
@@ -174,10 +202,14 @@ static NSWindow *DPApp_mainWindow(NSApplication *self, SEL _cmd) { return gMainW
 - (NSArray<DPFakeTab *> *)appleScriptTabs { return self.front.appleScriptTabs ?: @[]; }
 @end
 
+static int gScriptReads;
+
 @interface DPFakeAppDelegate : NSObject
-@property(strong) NSArray<DPFakeScriptWindow *> *appleScriptWindows;
+@property(nonatomic, strong) NSArray<DPFakeScriptWindow *> *appleScriptWindows;
 @end
 @implementation DPFakeAppDelegate
+@synthesize appleScriptWindows = _appleScriptWindows;
+- (NSArray *)appleScriptWindows { gScriptReads++; return _appleScriptWindows; }
 @end
 
 static DPFakeTab *DPTab(NSString *identifier, NSString *URL) {
@@ -239,6 +271,7 @@ static BOOL DPHas(NSArray<NSArray *> *rows, NSString *tabID, BOOL flag) { return
         [scripts addObject:_script];
         gDelegate.appleScriptWindows = scripts;
         _overlay = DPBarFor(window, _bar, _back);
+        DPSet(window, &DPRecentKey, @[ _back.tabId, _bar.tabId ]);
     }
     return self;
 }
@@ -292,6 +325,154 @@ static DPCommandBarOverlay *DPOpenBar(Class pageCls, NSString *name, BOOL panelF
     return DPGet(window, &DPOverlayKey);
 }
 
+static BOOL DPRecentHas(NSWindow *window, NSString *tabID) { return [(NSArray *)DPGet(window, &DPRecentKey) containsObject:tabID]; }
+
+// #623: a bar tab that was closed must not stay the tab the next new tab is said to have come from.
+static void DPCheckRepeatedNewTab(Class pageCls, Class stripCls, BOOL hiding, BOOL stripped, BOOL byKey) {
+    gHiding = hiding;
+    NSString *name = [NSString stringWithFormat:@"window-repeat-%d%d%d", hiding, stripped, byKey];
+    NSString *mode = [NSString stringWithFormat:@"%@, %@, %@", hiding ? @"Hide New Tab on" : @"Hide New Tab off", stripped ? @"tabs at top" : @"sidebar", byKey ? @"Cmd+T" : @"Esc"];
+    _TtC6Window14PlatformWindow *window = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
+                                                                                        styleMask:NSWindowStyleMaskTitled
+                                                                                          backing:NSBackingStoreBuffered defer:NO];
+    window.identifier = name;
+    gWindows = @[ window ];
+    if (stripped) [window.contentView addSubview:[[stripCls alloc] initWithFrame:NSMakeRect(0, 0, 600, 40)]];
+    DPFakeTab *site = DPTab([name stringByAppendingString:@"-site"], @"https://google.com");
+    DPFakeScriptWindow *script = [DPFakeScriptWindow new];
+    script.windowId = name;
+    script.front = DPSpace(@[ DPTab([name stringByAppendingString:@"-other"], @"https://example.org"), site ]);
+    script.appleScriptProfiles = @[ script.front ];
+    script.activeTab = site;
+    gDelegate.appleScriptWindows = @[ script ];
+    DPNoteActiveTab(window, script, NULL);
+    for (int round = 1; round <= 3; round++) {
+        NSString *what = [NSString stringWithFormat:@"%@, open %d", mode, round];
+        DPFakeTab *tab = DPTab([NSString stringWithFormat:@"%@-new%d", name, round], @"");
+        [script.front.appleScriptTabs addObject:tab];
+        script.activeTab = tab;
+        NSView *page = [[pageCls alloc] initWithFrame:window.contentView.bounds];
+        [page addSubview:[[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)]];
+        [window.contentView addSubview:page];
+        DPSpin(0.15);
+        DPCommandBarOverlay *bar = DPGet(window, &DPOverlayKey);
+        CHECK(bar && bar.openedTab == tab && bar.returnTab == site && !DPGet(page, &DPOwnBarKey) && ![DPBlanks(window) containsObject:tab.tabId],
+              [@"Cmd+T opens the floating bar over the page, not Dia's own New Tab page: " stringByAppendingString:what].UTF8String);
+        if (!bar) break;
+        script.activeTab = site;
+        if (byKey) DPCommandBarKey(DPKey(window, @"t", 17));
+        else DPCancelCommandBar(bar);
+        CHECK(!bar.host && tab.closed && !site.closed, [@"cancelling the bar closes only its own tab: " stringByAppendingString:what].UTF8String);
+        CHECK(!DPRecentHas(window, tab.tabId), [@"a closed bar tab leaves the recent tabs: " stringByAppendingString:what].UTF8String);
+        [script.front.appleScriptTabs removeObject:tab];
+        [page removeFromSuperview];
+    }
+    [script.front.appleScriptTabs removeObjectAtIndex:0];
+    _TtC5TabUI14TabContentView *row = [[_TtC5TabUI14TabContentView alloc] initWithFrame:NSMakeRect(0, 0, 200, 37)];
+    [window.contentView addSubview:row];
+    [row closeButtonClicked];
+    DPFakeTab *replacement = DPTab([name stringByAppendingString:@"-replacement"], @"");
+    [script.front.appleScriptTabs addObject:replacement];
+    [script.front.appleScriptTabs removeObject:site];
+    script.activeTab = replacement;
+    NSView *page = [[pageCls alloc] initWithFrame:window.contentView.bounds];
+    [page addSubview:[[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)]];
+    [window.contentView addSubview:page];
+    DPSpin(0.05);
+    CHECK(!DPGet(window, &DPOverlayKey) && page.hidden && [DPBlanks(window) containsObject:replacement.tabId],
+          [@"closing the last tab afterwards still leaves a blank, not a bar: " stringByAppendingString:mode].UTF8String);
+    [page removeFromSuperview];
+    [row removeFromSuperview];
+    DPSet(window, &DPBlankKey, nil);
+}
+
+// #622: ⌘L's bar opens where it stays, before any ⌘T has measured a bar for the window.
+static void DPCheckFirstCommandL(Class popoverCls, Class barCls, Class suggestionsCls, Class toolbarCls, NSString *position, BOOL compact) {
+    gChoice = position;
+    NSString *name = [NSString stringWithFormat:@"window-first-l-%@-%d", position, compact];
+    NSString *mode = [NSString stringWithFormat:@"%@, Compact Command Bar %@", position, compact ? @"on" : @"off"];
+    NSRect visible = NSScreen.mainScreen ? NSScreen.mainScreen.visibleFrame : NSMakeRect(0, 0, 1400, 1000);
+    _TtC6Window14PlatformWindow *window = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 700, MIN(1000, NSHeight(visible) - 100))
+                                                                                        styleMask:NSWindowStyleMaskTitled
+                                                                                          backing:NSBackingStoreBuffered defer:NO];
+    window.identifier = name;
+    [window setFrameTopLeftPoint:NSMakePoint(NSMinX(visible), NSMaxY(visible))];
+    gWindows = @[ window ];
+    DPFakeTab *site = DPTab([name stringByAppendingString:@"-site"], @"https://example.org");
+    DPFakeScriptWindow *script = [DPFakeScriptWindow new];
+    script.windowId = name;
+    script.front = DPSpace(@[ site ]);
+    script.appleScriptProfiles = @[ script.front ];
+    script.activeTab = site;
+    gDelegate.appleScriptWindows = @[ script ];
+
+    DPTrimmedPanel *panel = [[DPTrimmedPanel alloc] initWithFrame:NSMakeRect(40, 40, 500, 108)];
+    panel.compact = compact;
+    NSView *commandBar = [[barCls alloc] initWithFrame:panel.bounds];
+    DPFakeSuggestions *suggestions = [[suggestionsCls alloc] initWithFrame:NSMakeRect(0, 60, 500, 0)];
+    [commandBar addSubview:suggestions];
+    [commandBar addSubview:[[toolbarCls alloc] initWithFrame:NSMakeRect(0, 0, 500, 48)]];
+    [panel addSubview:commandBar];
+    NSView *popover = [[popoverCls alloc] initWithFrame:window.contentView.bounds];
+    [popover addSubview:panel];
+    [window.contentView addSubview:popover];
+
+    DPCommandBarOverlay *bar = DPGet(window, &DPOverlayKey);
+    CHECK(bar != nil && DPGet(window, &DPAnchorKey) == nil, [@"⌘L lifts its bar in a window no ⌘T has measured: " stringByAppendingString:mode].UTF8String);
+    if (!bar) return [popover removeFromSuperview];
+    CGFloat want = NSMinY(DPBarFrame(bar, NSMakeSize(500, 108), 108));
+    NSMutableArray<NSString *> *moved = [NSMutableArray array];
+    void (^settled)(NSString *) = ^(NSString *step) {
+        if (NSMinY(panel.frame) != want) [moved addObject:[NSString stringWithFormat:@"%@ %.0f", step, NSMinY(panel.frame) - want]];
+    };
+    NSRect (^diaSizes)(CGFloat) = ^NSRect(CGFloat height) { return NSMakeRect(40, 40, 500, height); };
+    settled(@"lifted");
+    panel.frame = diaSizes(108);
+    settled(@"Dia sizes it");
+    [bar layout];
+    settled(@"overlay layout");
+    DPSpin(0.6);
+    CHECK(bar.alphaValue == 1, [@"⌘L's bar shows once built: " stringByAppendingString:mode].UTF8String);
+    settled(@"shown");
+    panel.frame = diaSizes(108);
+    [bar layout];
+    settled(@"Dia sizes it again");
+    suggestions.rows = 160;
+    panel.frame = diaSizes(108 + 168);
+    settled(@"suggestions grow");
+    [bar layout];
+    settled(@"layout with suggestions");
+    suggestions.rows = 0;
+    panel.frame = diaSizes(108);
+    [bar layout];
+    settled(@"suggestions go");
+    panel.compact = !compact;
+    [panel setFrameSize:NSMakeSize(500, 108)];
+    [bar layout];
+    settled(@"Compact Command Bar toggled");
+    panel.frame = diaSizes(108);
+    [bar layout];
+    settled(@"Dia sizes it after the toggle");
+
+    DPCommandBarOverlay *newTabBar = [[DPCommandBarOverlay alloc] initWithFrame:window.contentView.bounds];
+    newTabBar.host = window;
+    NSView *newTabPage = [[NSView alloc] initWithFrame:NSZeroRect];
+    newTabBar.page = newTabPage;
+    NSView *newTabPanel = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 500, 108)];
+    [newTabPanel addSubview:[[barCls alloc] initWithFrame:newTabPanel.bounds]];
+    newTabBar.panel = newTabPanel;
+    [newTabBar frameForPanelSize:NSMakeSize(500, 108)];
+    CHECK([DPGet(window, &DPAnchorKey) doubleValue] == 108, [@"the new tab bar measures the same height ⌘L opened with: " stringByAppendingString:mode].UTF8String);
+    [bar layout];
+    settled(@"⌘T measured the window");
+    panel.frame = diaSizes(108);
+    settled(@"Dia sizes it after ⌘T");
+    NSString *shifts = [NSString stringWithFormat:@"⌘L's bar stays put from its first frame (%@): %@", mode, [moved componentsJoinedByString:@", "]];
+    CHECK(!moved.count, shifts.UTF8String);
+    [popover removeFromSuperview];
+    CHECK(!DPGet(window, &DPOverlayKey), [@"closing the popover closes the lifted bar: " stringByAppendingString:mode].UTF8String);
+}
+
 int main(void) {
     @autoreleasepool {
         unsetenv("DIATWEAKS_DOMAIN");
@@ -308,8 +489,12 @@ int main(void) {
 
         Class ntpCls = objc_allocateClassPair(DPFakeNewTabPage.class, DPDiaNewTabPage, 0);
         objc_registerClassPair(ntpCls);
+        Class paneCls = objc_allocateClassPair(NSView.class, DPDiaContentPane, 0);
+        objc_registerClassPair(paneCls);
         Class tabListCls = objc_allocateClassPair(NSView.class, DPDiaTabList, 0);
         objc_registerClassPair(tabListCls);
+        Class stripCls = objc_allocateClassPair(NSView.class, DPDiaTabStripTabs, 0);
+        objc_registerClassPair(stripCls);
 
         NSMenu *mainMenu = [[DPCountingMenu alloc] initWithTitle:@"Main"];
         NSMenuItem *fileRoot = [[NSMenuItem alloc] initWithTitle:@"File" action:nil keyEquivalent:@""];
@@ -526,6 +711,7 @@ int main(void) {
         CHECK(!scene.overlay.host && DPGet(browser, &DPOverlayKey) == nil, "the bar closes when another space comes forward");
         CHECK(scene.bar.closed, "the bar's unused new tab closes, even if the space in front has a single tab");
         CHECK(!scene.back.closed, "the tab the bar was opened from stays");
+        CHECK(!DPRecentHas(browser, scene.bar.tabId), "a bar tab closed for another space leaves the recent tabs");
         CHECK(DPLast(gShownRows, scene.bar.tabId, YES), "the closing tab's row stays hidden on its way out");
         CHECK(DPHas(gNotedSpares, scene.bar.tabId, NO) && !DPHas(gNotedSpares, scene.bar.tabId, YES),
               "a tab left behind in another space is no longer noted as a spare");
@@ -625,6 +811,15 @@ int main(void) {
         scene.overlay.page = barPage;
         DPCancelCommandBar(scene.overlay);
         CHECK(!scene.overlay.host && scene.bar.closed, "cancelling a bar in the space in front still closes its tab");
+        CHECK(!DPRecentHas(browser, scene.bar.tabId), "a cancelled bar's closed tab leaves the recent tabs");
+        scene = [[DPScene alloc] initIn:browser];
+        scene.overlay.page = barPage;
+        DPFakeTab *elsewhere = DPTab(@"window-a-elsewhere", @"https://example.net");
+        [scene.old.appleScriptTabs addObject:elsewhere];
+        scene.script.activeTab = elsewhere;
+        [scene watch];
+        CHECK(!scene.overlay.host && scene.bar.closed && !scene.back.closed && !elsewhere.closed && !DPRecentHas(browser, scene.bar.tabId),
+              "a bar left behind by a tab switch closes its tab and drops it from the recent tabs");
         [barPage removeFromSuperview];
         gHiding = NO;
 
@@ -682,7 +877,7 @@ int main(void) {
         DPCommandBarOverlay *launchBar = DPGet(launch, &DPOverlayKey);
         CHECK(launchBar && !launchBar.returnTab, "the bar opens over a launch tab with no tab to go back to");
         CHECK([gHiddenRowIDs containsObject:@"launch-new"] && [gStandIn isEqual:@"launch-new"],
-              "#606: the launch tab's row hides behind the bar and the New Tab button stands in for it");
+              "the launch tab's row hides behind the bar and the New Tab button stands in for it");
         DPDismiss(launchBar, NO);
         [launchPage removeFromSuperview];
 
@@ -710,8 +905,14 @@ int main(void) {
         [replacementPage addSubview:[[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)]];
         [closer.contentView addSubview:replacementPage];
         CHECK(DPGet(closer, &DPOverlayKey) == nil && replacementPage.hidden && [DPBlanks(closer) containsObject:@"replacement-tab"] && !DPGet(replacementPage, &DPOwnBarKey),
-              "#605: closing the last tab with the sidebar's X leaves its replacement blank, not a bar going back to the closed tab or Dia's own page");
+              "closing the last tab with the sidebar's X leaves its replacement blank, not a bar going back to the closed tab or Dia's own page");
         [replacementPage removeFromSuperview];
+
+        DPCheckRepeatedNewTab(ntpCls, stripCls, NO, NO, YES);
+        DPCheckRepeatedNewTab(ntpCls, stripCls, NO, YES, NO);
+        DPCheckRepeatedNewTab(ntpCls, stripCls, YES, NO, NO);
+        DPCheckRepeatedNewTab(ntpCls, stripCls, YES, YES, YES);
+        gHiding = YES;
 
         _TtC6Window14PlatformWindow *gone = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
                                                                                            styleMask:NSWindowStyleMaskTitled
@@ -732,18 +933,18 @@ int main(void) {
         [gonePage addSubview:[[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)]];
         [gone.contentView addSubview:gonePage];
         CHECK(DPGet(gone, &DPOverlayKey) == nil && !gonePage.hidden && DPGet(gonePage, &DPOwnBarKey),
-              "#605: a tab Dia still names active after closing by any route leaves the survivor's own page, not a bar for the closed tab");
+              "a tab Dia still names active after closing by any route leaves the survivor's own page, not a bar for the closed tab");
         goneScript.activeTab = goneNew;
         DPNoteActiveTab(gone, goneScript, NULL);
         CHECK(![DPSeenTabs(gone) containsObject:@"gone-closed"] && [DPSeenTabs(gone) containsObject:@"gone-keep"] && ![DPKeptTabs(gone) containsObject:@"gone-closed"],
-              "#605: a closed tab leaves the seen and kept sets, and only its own window's");
+              "a closed tab leaves the seen and kept sets, and only its own window's");
         [gonePage removeFromSuperview];
         NSMenuItem *closeOthers = [[NSMenuItem alloc] initWithTitle:@"Close Other Tabs" action:nil keyEquivalent:@""];
         gKeyWindow = littleDia;
         gMainWindow = gone;
         [NSNotificationCenter.defaultCenter postNotificationName:NSMenuWillSendActionNotification object:nil userInfo:@{ @"MenuItem" : closeOthers }];
         CHECK(DPGet(gone, &DPClosedAtKey) != nil && DPGet(littleDia, &DPClosedAtKey) == nil && fabs([DPGet(gone, &DPClosedAtKey) doubleValue] - NSProcessInfo.processInfo.systemUptime) < 5,
-              "#605: a close from the menu stamps the browser window it acts on, not whichever window is key");
+              "a close from the menu stamps the browser window it acts on, not whichever window is key");
         gKeyWindow = gMainWindow = nil;
         DPSet(gone, &DPClosedAtKey, nil);
 
@@ -755,7 +956,7 @@ int main(void) {
         gDelegate.appleScriptWindows = @[ idsScript ];
         gone.identifier = @"window-ids";
         BOOL emptySeen = YES;
-        CHECK(!DPNoteActiveTab(gone, idsScript, &emptySeen) && !emptySeen, "#606: tabs whose ID Dia hasn't given yet are not one tab already seen");
+        CHECK(!DPNoteActiveTab(gone, idsScript, &emptySeen) && !emptySeen, "tabs whose ID Dia hasn't given yet are not one tab already seen");
 
         DPFakeTab *lateOther = DPTab(@"late-other", @"https://example.org"), *lateTab = DPTab(nil, @"");
         DPFakeScriptWindow *lateScript = [DPFakeScriptWindow new];
@@ -775,11 +976,11 @@ int main(void) {
         gStandIn = nil;
         [late.contentView addSubview:latePage];
         DPCommandBarOverlay *lateBar = DPGet(late, &DPOverlayKey);
-        CHECK(lateBar != nil, "#606: the bar opens over a tab Dia hasn't named yet");
+        CHECK(lateBar != nil, "the bar opens over a tab Dia hasn't named yet");
         lateTab.tabId = @"launch-late";
         DPSpin(0.4);
         CHECK([gHiddenRowIDs containsObject:@"launch-late"] && [gStandIn isEqual:@"launch-late"],
-              "#606: a launch tab named after its page mounts still hides its row and stands the New Tab button in for it");
+              "a launch tab named after its page mounts still hides its row and stands the New Tab button in for it");
         DPDismiss(lateBar, NO);
         [latePage removeFromSuperview];
         gone.identifier = @"window-gone";
@@ -805,7 +1006,7 @@ int main(void) {
         [groupPage addSubview:[[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)]];
         [grouping.contentView addSubview:groupPage];
         CHECK(DPGet(grouping, &DPOverlayKey) == nil && !groupPage.hidden && DPGet(groupPage, &DPOwnBarKey),
-              "#600: New Group's new tab keeps Dia's page so the group's name field keeps the keyboard");
+              "New Group's new tab keeps Dia's page so the group's name field keeps the keyboard");
         [groupPage removeFromSuperview];
         DPFakeTab *groupBarTab = DPTab(@"group-bar", @"");
         [groupScript.front.appleScriptTabs addObject:groupBarTab];
@@ -821,10 +1022,13 @@ int main(void) {
         gHiding = NO;
 
         Class barCls = objc_allocateClassPair(NSView.class, DPDiaCommandBar, 0);
+        NSWindow *addressBarHost;
         objc_registerClassPair(barCls);
         gChoice = @"window";
         NSView *barHost = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
         DPCommandBarOverlay *newTabBar = [[DPCommandBarOverlay alloc] initWithFrame:barHost.bounds];
+        newTabBar.host = browser;
+        addressBarHost = browser;
         NSView *newTabPage = [[NSView alloc] initWithFrame:NSZeroRect];
         newTabBar.page = newTabPage;
         NSView *newTabPanel = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 500, 60)], *newTabRoot = [[barCls alloc] initWithFrame:NSMakeRect(0, 0, 500, 60)];
@@ -834,12 +1038,13 @@ int main(void) {
         [barHost addSubview:newTabBar];
         CGFloat newTabTop = NSMinY([newTabBar frameForPanelSize:NSMakeSize(500, 60)]);
         DPCommandBarOverlay *addressBar = [[DPCommandBarOverlay alloc] initWithFrame:barHost.bounds];
+        addressBar.host = addressBarHost;
         addressBar.page = popover;
         NSView *addressPanel = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 500, 84)];
         [addressBar addSubview:addressPanel];
         addressBar.panel = addressPanel;
         [barHost addSubview:addressBar];
-        CHECK(NSMinY([addressBar frameForPanelSize:NSMakeSize(500, 84)]) == newTabTop, "#601: ⌘L's bar opens with its top where ⌘T's was");
+        CHECK(NSMinY([addressBar frameForPanelSize:NSMakeSize(500, 84)]) == newTabTop, "⌘L's bar opens with its top where ⌘T's was");
         [addressBar removeFromSuperview];
         gHiding = NO;
         for (NSString *position in @[ @"macos", @"window", @"page" ])
@@ -847,7 +1052,7 @@ int main(void) {
                 gChoice = position;
                 NSView *openPage, *openPanel;
                 DPCommandBarOverlay *opened = DPOpenBar(ntpCls, [NSString stringWithFormat:@"window-open-%@-%@", position, panelFirst], panelFirst.boolValue, &openPage, &openPanel);
-                NSString *what = [NSString stringWithFormat:@"#601: the bar (%@, %@ first) opens at its anchor on its first frame", position, panelFirst.boolValue ? @"panel" : @"page"];
+                NSString *what = [NSString stringWithFormat:@"the bar (%@, %@ first) opens at its anchor on its first frame", position, panelFirst.boolValue ? @"panel" : @"page"];
                 CHECK(opened && openPanel.superview == opened && NSEqualRects(openPanel.frame, [opened frameForPanelSize:openPanel.frame.size]) && ![openPanel.layer animationForKey:@"slide"],
                       what.UTF8String);
                 [opened.watch invalidate];
@@ -855,6 +1060,77 @@ int main(void) {
                 [openPage removeFromSuperview];
             }
         gChoice = @"window";
+
+        // #619: each window keeps its own bar height, so one window's new tab bar never places another window's Cmd+L popover.
+        DPCommandBarOverlay *newTabBarA = [[DPCommandBarOverlay alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
+        newTabBarA.host = browser;
+        NSView *newTabPageA = [[ntpCls alloc] initWithFrame:NSZeroRect];
+        newTabBarA.page = newTabPageA;
+        NSView *panelA = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 500, 60)];
+        [panelA addSubview:[[barCls alloc] initWithFrame:NSMakeRect(0, 0, 500, 60)]];
+        newTabBarA.panel = panelA;
+        CGFloat topA = NSMinY([newTabBarA frameForPanelSize:NSMakeSize(500, 60)]);
+        DPCommandBarOverlay *popoverBarB = [[DPCommandBarOverlay alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
+        popoverBarB.host = browserB;
+        popoverBarB.page = popover;
+        NSView *panelB = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 500, 84)];
+        popoverBarB.panel = panelB;
+        CGFloat topB = NSMinY([popoverBarB frameForPanelSize:NSMakeSize(500, 84)]);
+        CHECK(topA == round(NSMidY(newTabBarA.bounds) - 30), "the new tab bar places its top from its own one line height");
+        CHECK(topB == round(NSMidY(popoverBarB.bounds) - 42),
+              "a window without a bar of its own places Cmd+L from its own height, not another window's");
+
+        Class suggestionsCls = objc_allocateClassPair(DPFakeSuggestions.class, DPDiaCommandBarSuggestions, 0);
+        objc_registerClassPair(suggestionsCls);
+        Class toolbarCls = objc_allocateClassPair(NSView.class, DPDiaCommandBarToolbar, 0);
+        objc_registerClassPair(toolbarCls);
+        for (NSString *position in @[ @"macos", @"window", @"page" ])
+            for (NSNumber *compact in @[ @NO, @YES ])
+                DPCheckFirstCommandL(popover.class, barCls, suggestionsCls, toolbarCls, position, compact.boolValue);
+        gChoice = @"window";
+
+        // #618: mounting a content pane with the bar off must not walk Dia's scripting bridge.
+        NSView *offPane = [[paneCls alloc] initWithFrame:NSMakeRect(0, 0, 300, 200)];
+        [browser.contentView addSubview:offPane];
+        DPCommandBar.on = NO;
+        gScriptReads = 0;
+        DPContentPane_viewDidMoveToWindow(offPane, @selector(viewDidMoveToWindow));
+        DPNewTabPage_viewDidMoveToWindow([[ntpCls alloc] initWithFrame:NSZeroRect], @selector(viewDidMoveToWindow));
+        CHECK(gScriptReads == 0, "mounting content panes with Command Bar off never reads Dia's scripting bridge");
+        DPCommandBar.on = YES;
+        gScriptReads = 0;
+        DPContentPane_viewDidMoveToWindow(offPane, @selector(viewDidMoveToWindow));
+        CHECK(gScriptReads > 0, "and with the bar on it still notes the tab it mounted for");
+        [offPane removeFromSuperview];
+
+        // #619: dragging a shade slider refreshes the shade it made instead of building a new one per tick.
+        NSUserDefaults *tuning = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
+        DPCommandBar.on = YES;
+        DPCommandBarBlur.on = YES;
+        DPCommandBarDarken.on = YES;
+        DPCommandBarShadow.on = YES;
+        DPCommandBarOverlay *shadeBar = [[DPCommandBarOverlay alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
+        shadeBar.host = browser;
+        shadeBar.returnTab = DPTab(@"shade-back", @"https://example.org");
+        NSView *shadePanel = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 500, 60)];
+        shadeBar.panel = shadePanel;
+        DPShowShade(shadeBar);
+        NSView *firstShade = shadeBar.shade, *firstBlur = shadeBar.windowBlur;
+        NSShadow *firstShadow = shadeBar.panel.shadow;
+        for (int i = 0; i < 100; i++) {
+            [tuning setDouble:i / 100.0 forKey:@"commandBarDarkness"];
+            [tuning setDouble:10 + i / 100.0 forKey:@"commandBarBlurRadius"];
+            DPShowShade(shadeBar);
+        }
+        CHECK(firstShade != nil && shadeBar.shade == firstShade && shadeBar.windowBlur == firstBlur,
+              "100 slider ticks keep the same shade and blur views");
+        CHECK(firstShadow != nil && [shadeBar.panel.shadow.shadowColor isEqual:firstShadow.shadowColor],
+              "refreshing the shade leaves the panel's shadow as it was");
+        [tuning removeObjectForKey:@"commandBarDarkness"];
+        [tuning removeObjectForKey:@"commandBarBlurRadius"];
+        DPCommandBarBlur.on = YES;
+        DPCommandBarDarken.on = YES;
+
         setenv("DIATWEAKS_DOMAIN", "com.diapatches.lifecycle-domain", 1);
         NSUserDefaults *scratch = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches.lifecycle-domain"];
         [scratch setDouble:0.5 forKey:@"commandBarHeight"];
@@ -871,11 +1147,14 @@ int main(void) {
         newTabPanel.frame = [newTabBar frameForPanelSize:newTabPanel.frame.size];
         newTabBar.keyMonitor = DPWatchKeys(newTabBar);
         [field insertText:@"a query long enough to wrap onto a second line in the floating bar" replacementRange:NSMakeRange(0, 0)];
-        CHECK(NSHeight(newTabPanel.frame) == 60 + 23 && NSMinY(newTabPanel.frame) == newTabTop, "#602: the bar grows a line downward once its text wraps");
+        CHECK(NSHeight(newTabPanel.frame) == 60 + 23 && NSMinY(newTabPanel.frame) == newTabTop, "the bar grows a line downward once its text wraps");
         [field insertText:@"short" replacementRange:NSMakeRange(0, field.string.length)];
-        CHECK(NSHeight(newTabPanel.frame) == 60 && NSMinY(newTabPanel.frame) == newTabTop, "#602: the bar shrinks back to one line");
+        CHECK(NSHeight(newTabPanel.frame) == 60 && NSMinY(newTabPanel.frame) == newTabTop, "the bar shrinks back to one line");
         DPStopWatching(newTabBar);
         CHECK(newTabBar.textWatch == nil, "closing the bar stops watching its text");
+        CFAbsoluteTime textStart = CFAbsoluteTimeGetCurrent();
+        for (int i = 0; i < 20000; i++) { @autoreleasepool { DPBarText(newTabBar); } }
+        printf("bar_text_us=%.3f\n", (CFAbsoluteTimeGetCurrent() - textStart) * 1e6 / 20000);
 
         Class logoCls = objc_allocateClassPair(NSView.class, "_TtC10NewTabPage8LogoView", 0);
         objc_registerClassPair(logoCls);
@@ -899,7 +1178,7 @@ int main(void) {
         DPKeepWindowsActive.on = YES;
         CHECK(behind._hasActiveAppearance && behind.hasKeyAppearance, "Keep Windows Active keeps a browser window looking active");
         CHECK(settings._hasActiveAppearance == DPAppKitAnswer(settings, @selector(_hasActiveAppearance)) && settings.hasKeyAppearance == DPAppKitAnswer(settings, @selector(hasKeyAppearance)),
-              "#608: the Settings window itself isn't kept looking active");
+              "the Settings window itself isn't kept looking active");
         DPKeepWindowsActive.on = NO;
         CHECK(behind._hasActiveAppearance == DPAppKitAnswer(behind, @selector(_hasActiveAppearance)), "Keep Windows Active off leaves AppKit's answer");
 
@@ -910,8 +1189,6 @@ int main(void) {
                                                                                                 backing:NSBackingStoreBuffered defer:NO];
         clicks.identifier = @"window-clicks";
         gWindows = @[ clicks ];
-        Class stripCls = objc_allocateClassPair(NSView.class, DPDiaTabStripTabs, 0);
-        objc_registerClassPair(stripCls);
         NSView *strip = [[stripCls alloc] initWithFrame:NSMakeRect(0, 0, 600, 40)], *plus = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 28, 28)];
         [strip addSubview:plus];
         [clicks.contentView addSubview:strip];
@@ -927,7 +1204,7 @@ int main(void) {
         gRelayouts = 0;
         NSView *tabList = [[tabListCls alloc] initWithFrame:NSMakeRect(0, 0, 200, 300)];
         [clicks.contentView addSubview:tabList];
-        CHECK(gRelayouts > 0, "#606: a sidebar mounting while a tab is hidden lays out again to park its row");
+        CHECK(gRelayouts > 0, "a sidebar mounting while a tab is hidden lays out again to park its row");
         gHidingATab = NO;
         [tabList removeFromSuperview];
 

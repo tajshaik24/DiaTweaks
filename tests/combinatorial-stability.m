@@ -21,7 +21,7 @@
 #import "Patches/CommandBar/HideTab.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/CommandBar/AutoPip.h"
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/UnloadTab/Pages.h"
 #import "Patches/UnloadTab/Recent.h"
@@ -29,8 +29,18 @@
 
 #pragma mark - Isolated Defaults & SafeMode Path
 
-static NSString *DPCombSuiteName(void) {
-    return [NSString stringWithFormat:@"com.diapatches.combinatorial-test.%d", getpid()];
+// An absolute path keeps the plist in the scratch folder: a short domain lands in ~/Library/Preferences and cfprefsd rewrites it after removal.
+static NSString *DPCombScratchDir(void) {
+    static NSString *scratch;
+    if (!scratch) scratch = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"dp-comb-%d-%@", getpid(), NSUUID.UUID.UUIDString]];
+    return scratch;
+}
+
+static NSString *DPCombSuiteName(void) { return [DPCombScratchDir() stringByAppendingPathComponent:@"com.diapatches"]; }
+
+static void DPCombCleanup(void) {
+    [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPCombSuiteName()];
+    [NSFileManager.defaultManager removeItemAtPath:DPCombScratchDir() error:nil];
 }
 
 @interface NSUserDefaults (DPCombIsolation)
@@ -82,6 +92,7 @@ void *swift_unknownObjectWeakLoadStrong(void *ref) {
     return shared;
 }
 - (void)check:(void (^)(void))done {}
+- (void)checkAutomatically:(void (^)(void))done {}
 - (BOOL)available:(NSString *)part { return NO; }
 - (BOOL)staged:(NSString *)part { return NO; }
 - (BOOL)downloading:(NSString *)part { return NO; }
@@ -165,6 +176,7 @@ BOOL DPAdoptSpare(NSWindow *window, NSView *page) { return NO; }
 void DPNotMakingSpare(void) {}
 NSView *DPCommandBarPart(NSView *commandBar, const char *className) { return nil; }
 NSView *DPGoButton(NSView *toolbar) { return nil; }
+CGFloat DPTrim(NSView *container) { return 0; }
 NSString *DPRowName(NSCollectionView *list, NSIndexPath *path) {
     NSInteger idx = path.section == 0 ? path.item : 3 + path.item;
     return idx >= 0 && idx < (NSInteger)gRowNames.count ? gRowNames[idx] : nil;
@@ -1760,7 +1772,8 @@ int main(void) {
         // Isolate NSUserDefaults and SafeMode pause file to scratch storage.
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
                                        class_getInstanceMethod(NSUserDefaults.class, @selector(dp_combInitWithSuiteName:)));
-        NSString *scratchDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"dp-comb-%d-%@", getpid(), NSUUID.UUID.UUIDString]];
+        NSString *scratchDir = DPCombScratchDir();
+        DPOnTestCleanup(DPCombCleanup);
         [NSFileManager.defaultManager createDirectoryAtPath:scratchDir withIntermediateDirectories:YES attributes:nil error:nil];
         NSString *fakeDylib = [scratchDir stringByAppendingPathComponent:@"DiaPatches.dylib"];
         DPTestDylibPath = fakeDylib.fileSystemRepresentation;
@@ -1815,9 +1828,6 @@ int main(void) {
         DPRunTest(TestClusterCMenusOverlaysAndLayout);
         DPRunTest(TestClusterDLaunchFlagsAndCoveredTweaks);
         DPRunTest(TestPermutationAndPauseStress);
-
-        [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPCombSuiteName()];
-        [NSFileManager.defaultManager removeItemAtPath:scratchDir error:nil];
     }
     if (gFailures) {
         printf("FAIL: %d combinatorial stability check(s) failed\n", gFailures);

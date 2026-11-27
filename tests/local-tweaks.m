@@ -354,8 +354,8 @@ int main(int argc, const char *argv[]) {
         DPLoadPatches();
         DPPatch *tweak = DPPatchNamed(@"myTweak");
         expect(tweak != NULL, @"a single .m tweak loads");
-        // 103 of upstream's, three of the fork's (uBlock Origin, Hide Pinned Tabs in Tab Bar, Hide Profile Name), one local.
-        expect(DPPatchCount == 107, @"the table holds the 106 official tweaks and the local one");
+        // 107 of upstream's, three of the fork's (uBlock Origin, Hide Pinned Tabs in Tab Bar, Hide Profile Name), one local.
+        expect(DPPatchCount == 111, @"the table holds the 110 official tweaks and the local one");
         expect(DPIsLocalPatch(tweak), @"the tweak is marked local");
         expectEqual(tweak->section, @"Local", @"a local tweak defaults to the Local section");
         expectEqual(tweak->tint, @"systemOrangeColor", @"a local tweak defaults to the orange tint");

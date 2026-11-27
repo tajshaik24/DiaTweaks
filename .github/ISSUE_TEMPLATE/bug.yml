@@ -58,6 +58,7 @@ body:
         - Close Button on Pinned Tabs
         - Minus Button on Open Pinned Tabs
         - Profile Emoji
+        - Only on Current Profile
         - Profile Color Picker
         - Private Window Theme
         - Switch Profiles with ⌘1–9
@@ -157,6 +158,6 @@ body:
     id: versions
     attributes:
       label: Dia and macOS versions
-      placeholder: Dia 1.55.1, macOS 26.1
+      placeholder: Dia 1.59.0, macOS 26.x
     validations:
       required: true

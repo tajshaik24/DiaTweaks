@@ -1,6 +1,18 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
+<<<<<<< HEAD
+=======
+support="${DIAPATCH_HOME:-$HOME/Library/Application Support/DiaPatches}"
+app=${DIAPATCH_APP:-}
+if [ -z "$app" ]; then
+    app=/Applications/Dia.app
+    for candidate in "$(cat "$support/dia-app" 2>/dev/null)" /Applications/Dia.app "$HOME/Applications/Dia.app"; do
+        if [ -x "$candidate/Contents/MacOS/Dia" ]; then app=$candidate; break; fi
+    done
+fi
+dia="$app/Contents/MacOS/Dia"
+>>>>>>> upstream/main
 report="$PWD/build/test-report.json"
 
 # The test runs in a second Dia (scripts/test-dia), never yours: its own app copy, data, settings and DiaTweaks build,
