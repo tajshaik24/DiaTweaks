@@ -488,11 +488,23 @@ void DPCancelCommandBar(DPCommandBarOverlay *overlay) {
     if (DPIsKind(page, DPDiaPopover)) [DPBarText(overlay) doCommandBySelector:@selector(cancelOperation:)];
     else if (DPCommandBarKeepText.on) DPSet(window, &DPLeftTextKey, DPBarText(overlay).string.copy);
     BOOL nowhereToGo = DPNowhereToGo(overlay);
+    id back = overlay.returnTab;
+    // A bar that stayed on its own tab (over a Meet call) goes back to the tab it came from, not whichever Dia picks.
+    BOOL onBarTab = DPIsMeetCall(back) && [DPActiveTabID(window) isEqual:DPTabID(overlay.openedTab)];
     id tab = DPDismiss(overlay, !overBlank && !nowhereToGo);
     if (!tab) return;
     // Closing a window's only tab would close the window, and Dia with it.
     if (overBlank || nowhereToGo) DPMakeBlank(page, DPTabID(tab), nil);
-    else DPCloseBarTab(window, tab);
+    else {
+        if (!onBarTab) return DPCloseBarTab(window, tab);
+        // Close once Dia has finished switching back: closing a tab mid-switch can crash it.
+        DPFocusTab(back);
+        __weak NSWindow *weakWindow = window;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            NSWindow *host = weakWindow;
+            if (host && ![DPActiveTabID(host) isEqual:DPTabID(tab)]) DPCloseBarTab(host, tab);
+        });
+    }
 }
 
 static void DPCloseOnNewLayout(NSWindow *window) {
@@ -768,8 +780,7 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     BOOL hasPage = openedID && !overBlank && (DPHasURL(openedTab) || [kept containsObject:openedID]);
     BOOL returnsToPage = returnTab && [kept containsObject:returnID] && !DPHasURL(returnTab);
     // Keep Dia's own page for tabs with history or splits, since returning mid-switch to a split crashes Dia.
-    // Never switch back to a Meet call behind the bar: Meet can reload when its page is moved mid-call.
-    if (hasPage || returnsToPage || DPIsMeetCall(returnTab) || DPInSplit(page) || (!overBlank && [(NSSet *)DPGet(window, &DPSplitKey) containsObject:returnID])) {
+    if (hasPage || returnsToPage || DPInSplit(page) || (!overBlank && [(NSSet *)DPGet(window, &DPSplitKey) containsObject:returnID])) {
         if (openedID) [kept addObject:openedID];
         DPStopExpecting();
         return (void)DPSet(page, &DPOwnBarKey, @YES);
@@ -796,6 +807,9 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     if (!openedID) DPHoldBarTabOnceNamed(overlay, 10);
     DPWatch(overlay);
     if (!overlay.returnTab) return DPParkIfSpare(overlay);
+    // Never switch back to a Meet call behind the bar: moving its page mid-switch can reload the call.
+    // The bar stays on its own tab, and cancelling it goes back to the call like any tab switch.
+    if (DPIsMeetCall(overlay.returnTab)) return;
     __weak DPCommandBarOverlay *weak = overlay;
     // Defer DPGoBack past Dia's tab switch (calling it inline crashes) inside a transaction to hide the flash.
     [CATransaction begin];
@@ -972,8 +986,8 @@ static NSEvent *DPCommandBarKey(NSEvent *event) {
     if (!(newTab || DPIsShortcut(event, @"Open Command Bar"))) return event;
     DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
     if (!newTab && !overlay && DPVisiblePeekTakesCommandL(window)) return event;
-    // On a Meet call, ⌘L and ⌘T go to Dia's own address bar and new tab: the bar's tab switching can reload the call.
-    if (!overlay && DPOnMeetCall(window)) return event;
+    // On a Meet call, ⌘L goes to Dia's own address bar; ⌘T's bar stays on its new tab (see DPPresentCommandBar).
+    if (!newTab && !overlay && DPOnMeetCall(window)) return event;
     DPSet(window, &DPClosedAtKey, nil);
     DPNotMakingSpare();
     if (event.isARepeat) {
@@ -1093,7 +1107,8 @@ static void DPNewTabPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     NSMutableSet<NSString *> *blanks = DPGet(window, &DPBlankKey);
     DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
     if (overlay && [active isEqual:DPTabID(overlay.openedTab)]) {
-        if (overlay.returnTab) dispatch_async(dispatch_get_main_queue(), ^{ if (overlay.host) DPFocusTab(overlay.returnTab); });
+        if (overlay.returnTab && !DPIsMeetCall(overlay.returnTab))
+            dispatch_async(dispatch_get_main_queue(), ^{ if (overlay.host) DPFocusTab(overlay.returnTab); });
         return;
     }
     if (overlay.returnTab && [active isEqual:DPTabID(overlay.returnTab)] && ![blanks containsObject:active]) return (void)DPSet(self, &DPOwnBarKey, @YES);
